@@ -1,0 +1,33 @@
+name: Bug report
+description: Report a reproducible AgentOne problem using synthetic data.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach real diaries, screenshots, API keys, OAuth tokens, or private work content.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the user-visible behavior and the expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Synthetic reproduction
+      description: Provide steps and synthetic Context that reproduce the problem.
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: AgentOne commit

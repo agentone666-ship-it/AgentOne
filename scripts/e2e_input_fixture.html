@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>AgentOne Return OCR Fixture</title>
+  <style>
+    body { margin: 0; font: 18px -apple-system, BlinkMacSystemFont, sans-serif; background: #f3f4f6; }
+    main { width: 760px; margin: 60px auto; padding: 28px; background: white; border-radius: 16px; box-shadow: 0 8px 28px #0002; }
+    aside { float: left; width: 190px; color: #667085; font-size: 14px; }
+    section { margin-left: 220px; }
+    .history { padding: 12px; background: #eef2ff; border-radius: 10px; margin-bottom: 24px; }
+    textarea { box-sizing: border-box; width: 100%; min-height: 92px; padding: 14px; border: 2px solid #4f46e5; border-radius: 10px; font: inherit; }
+    #status { margin-top: 14px; color: #166534; }
+  </style>
+</head>
+<body>
+  <main>
+    <aside>
+      <div>历史噪音一：旧任务列表</div>
+      <div>历史噪音二：不要被 OCR 选中</div>
+      <div>历史噪音三：AgentOne 测试</div>
+    </aside>
+    <section>
+      <h1>整屏定位输入框验收</h1>
+      <div class="history">历史消息：这段文字故意与输入内容不同，防止页面噪音混入。</div>
+      <label for="composer">真正的输入框</label>
+      <textarea id="composer" aria-label="真正的输入框" placeholder="在这里输入测试观点，然后按回车"></textarea>
+      <div id="status" aria-live="polite">尚未提交</div>
+    </section>
+  </main>
+  <script>
+    const composer = document.getElementById('composer');
+    const status = document.getElementById('status');
+    composer.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        status.textContent = '已收到 Return（内容保留在输入框，供 AgentOne OCR 验收）';
+      }
+    });
+  </script>
+</body>
+</html>

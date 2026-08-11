@@ -1,0 +1,47 @@
+# macOS / Xcode / SwiftPM
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Packaged applications and local build output
+build/
+*.app
+*.app.zip
+*.dSYM
+
+# JavaScript / TypeScript
+AgentOneLifeRuntime/node_modules/
+AgentOneLifeRuntime/dist/
+AgentOneLifeRuntime/dist-test/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.mobileprovision
+credentials.json
+secrets.json
+
+# AgentOne user-owned data. These folders must never become repository input.
+AgentOne Home/
+Diary/
+Evidence/
+Memory/
+Skills/
+Model Invocations/
+*.agentone-private.json
+
+# Editor state
+.idea/
+.vscode/
+*.swp
+*.swo
