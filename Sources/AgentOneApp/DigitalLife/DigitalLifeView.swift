@@ -21,9 +21,20 @@ struct DigitalLifeView: View {
     @State private var currentArtworkKey: String?
     @State private var previousArtworkKey: String?
     @State private var artworkTransitionStart: TimeInterval?
+    @State private var isInteractionBoosted = false
+    @State private var interactionBoostTask: Task<Void, Never>?
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion)) { timeline in
+        // `.animation` is synchronized to the display link. Even with a large
+        // `minimumInterval`, SwiftUI may keep the render graph attached to the
+        // screen refresh cycle. A periodic schedule creates real idle gaps
+        // between frames, which is essential for an always-on desktop life.
+        TimelineView(
+            .periodic(
+                from: .now,
+                by: reduceMotion ? 3_600 : animationMinimumInterval
+            )
+        ) { timeline in
             let time = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
             Canvas(opaque: false, colorMode: .extendedLinear, rendersAsynchronously: true) { context, canvasSize in
                 draw(
@@ -50,6 +61,7 @@ struct DigitalLifeView: View {
         }
         .onTapGesture {
             touchPulse &+= 1
+            brieflyBoostAnimation()
             onAction?(.touched)
         }
         .onAppear {
@@ -66,10 +78,47 @@ struct DigitalLifeView: View {
             currentArtworkKey = newKey
             artworkTransitionStart = Date.timeIntervalSinceReferenceDate
         }
+        .onDisappear {
+            interactionBoostTask?.cancel()
+            interactionBoostTask = nil
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("AgentOne 数字生命")
         .accessibilityValue(state.accessibilityDescription)
         .accessibilityAddTraits(onAction == nil ? [] : .isButton)
+    }
+
+    /// The companion is deliberately not a continuously animated wallpaper. A calm life state
+    /// only needs a few frames per second to retain its breathing presence, while states where the
+    /// user is actively looking at or touching it can briefly render more often. Keeping this
+    /// schedule below 15 FPS prevents the always-on floating window from competing with typing,
+    /// scrolling, video playback, or local model work.
+    private var animationMinimumInterval: TimeInterval {
+        if isHovered || isInteractionBoosted {
+            return 1 / 8
+        }
+
+        switch state {
+        case .curious, .thinking:
+            return 1 / 2
+        case .celebrating, .distraction:
+            return 1 / 4
+        case .focused, .concealingSurprise:
+            return 1
+        case .resting, .energySaver:
+            return 2
+        }
+    }
+
+    private func brieflyBoostAnimation() {
+        interactionBoostTask?.cancel()
+        isInteractionBoosted = true
+        interactionBoostTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.2))
+            guard !Task.isCancelled else { return }
+            isInteractionBoosted = false
+            interactionBoostTask = nil
+        }
     }
 
     private var configuration: VisualConfiguration {
@@ -104,7 +153,11 @@ struct DigitalLifeView: View {
 
         static func make(for side: CGFloat) -> Self {
             if side < 64 { return .minimal }
-            if side < 96 { return .reduced }
+            // The always-on 126pt companion does not benefit visually from the
+            // full particle/orbit budget, but the extra layers materially raise
+            // its persistent GPU and WindowServer cost. Reserve full detail for
+            // large showcase/onboarding renders.
+            if side < 168 { return .reduced }
             return .full
         }
 

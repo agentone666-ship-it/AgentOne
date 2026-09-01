@@ -112,6 +112,19 @@ test("API Key route defaults to the approved GLM Chat Completions service", () =
   });
 });
 
+test("local route configures Ollama without a user API key", () => {
+  const configuration = runtimeModelConfigurationFromEnvironment({
+    AGENTONE_MODEL_ROUTE: "local",
+  });
+  assert.deepEqual(configuration, {
+    route: "local",
+    provider: "ollama",
+    model: "llama3.2:3b",
+    apiKey: "ollama-local",
+    baseUrl: "http://127.0.0.1:11434/v1",
+  });
+});
+
 test("custom GLM URL is normalized while arbitrary cleartext endpoints are rejected", () => {
   const approved = runtimeModelConfigurationFromEnvironment({
     AGENTONE_MODEL_ROUTE: "cloud",

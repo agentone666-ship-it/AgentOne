@@ -220,6 +220,94 @@ struct AgentOneModelRuntimeHarness {
         )
         try check(digestPrompt.contains("Context 提炼成日记"), "Daily Context was omitted from the digest prompt.")
         try check(digestPrompt.contains("不接受只做冒烟演示"), "Relationship memory was omitted from the digest prompt.")
+
+        CapturingURLProtocol.reset()
+        let localClient = OpenAICompatibleModelClient(
+            configuration: .init(
+                baseURL: baseURL,
+                model: "llama3.2:3b",
+                providerName: "ollama",
+                route: .local,
+                requiresAPIKey: false,
+                enforcesResourcePolicy: false
+            ),
+            session: session
+        )
+        _ = try await localClient.infer(
+            ModelInferenceRequest(
+                purpose: "local_context_enrichment",
+                systemPrompt: "Return one JSON object.",
+                userPrompt: "只在本机分析。",
+                context: context,
+                allowsCloudProcessing: false
+            ),
+            apiKey: ""
+        )
+        let localRequest = try require(CapturingURLProtocol.requests().first, "Local inference did not reach the configured endpoint.")
+        try check(localRequest.value(forHTTPHeaderField: "Authorization") == nil, "Local inference unexpectedly sent an Authorization header.")
+
+        let safeSnapshot = LocalInferenceResourceSnapshot(
+            memoryPressureLevel: 1,
+            availableMemoryBytes: 8 * 1_024 * 1_024 * 1_024,
+            compressedMemoryBytes: 512 * 1_024 * 1_024,
+            swapUsedBytes: 0,
+            physicalMemoryBytes: 16 * 1_024 * 1_024 * 1_024,
+            oneMinuteLoadAverage: 2,
+            logicalProcessorCount: 10,
+            thermalState: 0,
+            isLowPowerModeEnabled: false
+        )
+        try check(
+            LocalInferenceResourcePolicy.evaluate(
+                snapshot: safeSnapshot,
+                secondsSinceLastInteraction: 20,
+                minimumIdleSeconds: 8,
+                userInitiated: false
+            ).canRun,
+            "A safe, idle Mac was incorrectly blocked from local inference."
+        )
+        var pressuredSnapshot = safeSnapshot
+        pressuredSnapshot.memoryPressureLevel = 2
+        try check(
+            LocalInferenceResourcePolicy.evaluate(
+                snapshot: pressuredSnapshot,
+                secondsSinceLastInteraction: 20,
+                minimumIdleSeconds: 8,
+                userInitiated: false
+            ).reason == .memoryPressure,
+            "Memory pressure did not hard-block local inference."
+        )
+        var compressedSnapshot = safeSnapshot
+        compressedSnapshot.compressedMemoryBytes = 5 * 1_024 * 1_024 * 1_024
+        try check(
+            LocalInferenceResourcePolicy.evaluate(
+                snapshot: compressedSnapshot,
+                secondsSinceLastInteraction: 20,
+                minimumIdleSeconds: 8,
+                userInitiated: false
+            ).reason == .memoryCompression,
+            "Heavy memory compression did not hard-block local inference."
+        )
+        var swappedSnapshot = safeSnapshot
+        swappedSnapshot.swapUsedBytes = 5 * 1_024 * 1_024 * 1_024
+        try check(
+            LocalInferenceResourcePolicy.evaluate(
+                snapshot: swappedSnapshot,
+                secondsSinceLastInteraction: 20,
+                minimumIdleSeconds: 8,
+                userInitiated: false
+            ).reason == .swapUsage,
+            "Heavy swap usage did not hard-block local inference."
+        )
+        try check(
+            LocalInferenceResourcePolicy.evaluate(
+                snapshot: safeSnapshot,
+                secondsSinceLastInteraction: 2,
+                minimumIdleSeconds: 8,
+                userInitiated: false
+            ).reason == .foregroundActivity,
+            "Foreground activity did not defer background local inference."
+        )
     }
 
     private static func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {

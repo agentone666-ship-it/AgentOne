@@ -1,24 +1,28 @@
 import Foundation
-import XCTest
+import Testing
 @testable import AgentOneCore
 
-final class ContextMemoryEngineTests: XCTestCase {
+@Suite(.serialized)
+struct ContextMemoryEngineTests {
+    @Test
     func testHookSemanticsTreatReturnAsOpinionOutputWithoutCapturingText() {
         let event = ActivityEvent(signal: .keyboard(.returnPressed))
 
-        XCTAssertTrue(event.semantics.contains(.opinionOutput))
-        XCTAssertTrue(event.semantics.contains(.taskSubmission))
-        XCTAssertFalse(event.semantics.contains(.compositionContinued))
+        #expect(event.semantics.contains(.opinionOutput))
+        #expect(event.semantics.contains(.taskSubmission))
+        #expect(!(event.semantics.contains(.compositionContinued)))
     }
 
+    @Test
     func testScrollAndTypingMapToReadingAndComposition() {
         let scroll = ActivityEvent(signal: .scrolled(axis: .vertical, delta: 120, phase: .changed))
         let typing = ActivityEvent(signal: .keyboard(.typingBurst(estimatedCharacterCount: 24)))
 
-        XCTAssertEqual(scroll.semantics, [.readingProgress, .navigation])
-        XCTAssertEqual(typing.semantics, [.compositionContinued])
+        #expect(scroll.semantics == [.readingProgress, .navigation])
+        #expect(typing.semantics == [.compositionContinued])
     }
 
+    @Test
     func testPrimaryClickIsOnlyCandidateIntentUntilContextActuallyChanges() {
         let click = ActivityEvent(signal: .mouseClicked(
             button: .left,
@@ -26,10 +30,11 @@ final class ContextMemoryEngineTests: XCTestCase {
             location: ScreenPoint(x: 420, y: 260)
         ))
 
-        XCTAssertEqual(click.semantics, [.selectionOrActivation])
-        XCTAssertFalse(click.semantics.contains(.navigation))
+        #expect(click.semantics == [.selectionOrActivation])
+        #expect(!(click.semantics.contains(.navigation)))
     }
 
+    @Test
     func testReturnPersistsSubmittedTextAndScreenshotAsEmbeddedEvidence() async throws {
         let diary = try AppendOnlyDiary()
         let engine = ContextMemoryEngine(diary: diary)
@@ -61,27 +66,28 @@ final class ContextMemoryEngineTests: XCTestCase {
             guard case .evidence(let item) = entry.payload else { return nil }
             return item
         }
-        XCTAssertEqual(evidence.count, 1)
-        XCTAssertEqual(evidence.first?.kind, .screenshot)
-        XCTAssertEqual(evidence.first?.localResourcePath, screenshotPath)
-        XCTAssertEqual(evidence.first?.submittedText, "重新修一下，让这些功能真正落地。")
+        #expect(evidence.count == 1)
+        #expect(evidence.first?.kind == .screenshot)
+        #expect(evidence.first?.localResourcePath == screenshotPath)
+        #expect(evidence.first?.submittedText == "重新修一下，让这些功能真正落地。")
 
         let activity = entries.compactMap { entry -> ActivityDiaryRecord? in
             guard case .activity(let record) = entry.payload else { return nil }
             return record
         }.first
-        XCTAssertEqual(activity?.evidenceIDs, [evidence[0].id])
+        #expect(activity?.evidenceIDs == [evidence[0].id])
 
         let replay = await engine.replay(for: timestamp)
-        XCTAssertEqual(replay.moments.filter { $0.kind == .evidence }.count, 0)
-        XCTAssertTrue(replay.moments.contains { $0.evidenceIDs == [evidence[0].id] })
+        #expect(replay.moments.filter { $0.kind == .evidence }.count == 0)
+        #expect(replay.moments.contains { $0.evidenceIDs == [evidence[0].id] })
         let thought = replay.moments.first {
             $0.kind == .thought && $0.title == "用户正在验证回车 Context。"
         }
-        XCTAssertEqual(thought?.submittedText, "重新修一下，让这些功能真正落地。")
-        XCTAssertEqual(thought?.evidenceIDs, [evidence[0].id])
+        #expect(thought?.submittedText == "重新修一下，让这些功能真正落地。")
+        #expect(thought?.evidenceIDs == [evidence[0].id])
     }
 
+    @Test
     func testFiftyScrollHooksBecomeOneReadingSessionAndOneReplayMoment() async throws {
         let diary = try AppendOnlyDiary()
         let engine = ContextMemoryEngine(diary: diary)
@@ -106,16 +112,18 @@ final class ContextMemoryEngineTests: XCTestCase {
 
         _ = try await engine.flushPendingActivity(at: base.addingTimeInterval(100))
         let activityRecords = await activityRecords(in: diary)
-        XCTAssertEqual(activityRecords.count, 1)
-        XCTAssertEqual(activityRecords.first?.session?.eventCount, 50)
-        XCTAssertEqual(activityRecords.first?.session?.totalMagnitude, 1_200)
+        #expect(activityRecords.count == 1)
+        #expect(activityRecords.first?.session?.eventCount == 50)
+        #expect(activityRecords.first?.session?.totalMagnitude == 1_200)
 
         let replay = await engine.replay(for: base)
         let readingMoments = replay.moments.filter { $0.kind == .activity && $0.title.hasPrefix("Read ") }
-        XCTAssertEqual(readingMoments.count, 1)
-        XCTAssertTrue(readingMoments.first?.detail?.contains("已合并 50 个滚轮信号") == true)
+        #expect(readingMoments.count == 1)
+        #expect(readingMoments.first?.detail?.contains("Attention Is All You Need") == true)
+        #expect(readingMoments.first?.detail?.contains("已合并") != true)
     }
 
+    @Test
     func testLegacyScrollEntriesRemainImmutableButProjectAsReadingSessions() async throws {
         let diary = try AppendOnlyDiary()
         let base = Date(timeIntervalSince1970: 1_711_000_000)
@@ -142,17 +150,18 @@ final class ContextMemoryEngineTests: XCTestCase {
         }
 
         let original = await diary.allEntries()
-        XCTAssertEqual(original.count, 50)
-        XCTAssertTrue(original.allSatisfy { entry in
+        #expect(original.count == 50)
+        #expect(original.allSatisfy { entry in
             guard case .activity(let record) = entry.payload else { return false }
             return record.session == nil
         })
 
         let replay = SemanticReplayBuilder().build(day: "legacy", entries: original)
-        let readingMoments = replay.moments.filter { $0.detail?.contains("已合并") == true }
-        XCTAssertEqual(readingMoments.count, 1)
-        XCTAssertTrue(readingMoments.first?.detail?.contains("已合并 50 个滚轮信号") == true)
-        XCTAssertEqual(HabitContextExtractor().extract(from: original).first?.supportingSessionCount, 1)
+        let readingMoments = replay.moments.filter { $0.kind == .activity && $0.title.hasPrefix("Read ") }
+        #expect(readingMoments.count == 1)
+        #expect(readingMoments.first?.detail?.contains("Legacy paper A") == true)
+        #expect(readingMoments.first?.detail?.contains("已合并") != true)
+        #expect(HabitContextExtractor().extract(from: original).first?.supportingSessionCount == 1)
 
         let typing = ActivityEvent(
             timestamp: base.addingTimeInterval(110),
@@ -171,10 +180,10 @@ final class ContextMemoryEngineTests: XCTestCase {
             windowIdentifier: "legacy-b",
             url: URL(string: "https://example.com/legacy-b")
         )
-        for index in 0..<4 {
+        for index in 0..<8 {
             let event = ActivityEvent(
                 timestamp: base.addingTimeInterval(120 + Double(index) * 2),
-                signal: .scrolled(axis: .vertical, delta: 25, phase: index == 0 ? .began : (index == 3 ? .ended : .changed)),
+                signal: .scrolled(axis: .vertical, delta: 25, phase: index == 0 ? .began : (index == 7 ? .ended : .changed)),
                 context: secondContext
             )
             _ = try await diary.append(.activity(ActivityDiaryRecord(
@@ -185,19 +194,19 @@ final class ContextMemoryEngineTests: XCTestCase {
 
         let withBoundary = await diary.allEntries()
         let replayWithBoundary = SemanticReplayBuilder().build(day: "legacy", entries: withBoundary)
-        XCTAssertEqual(replayWithBoundary.moments.filter { $0.detail?.contains("已合并") == true }.count, 2)
-        XCTAssertEqual(HabitContextExtractor().extract(from: withBoundary).first?.supportingSessionCount, 2)
-        XCTAssertEqual(withBoundary.count, 55)
+        #expect(replayWithBoundary.moments.filter { $0.kind == .activity && $0.title.hasPrefix("Read ") }.count == 2)
+        #expect(HabitContextExtractor().extract(from: withBoundary).first?.supportingSessionCount == 2)
+        #expect(withBoundary.count == 59)
 
         let ownContext = ActivityContext(
             applicationName: "AgentOne",
             bundleIdentifier: "life.agentone.desktop",
             windowTitle: "AgentOne"
         )
-        for index in 0..<4 {
+        for index in 0..<20 {
             let event = ActivityEvent(
-                timestamp: base.addingTimeInterval(140 + Double(index)),
-                signal: .scrolled(axis: .vertical, delta: 20, phase: index == 0 ? .began : (index == 3 ? .ended : .changed)),
+                timestamp: base.addingTimeInterval(150 + Double(index)),
+                signal: .scrolled(axis: .vertical, delta: 20, phase: index == 0 ? .began : (index == 19 ? .ended : .changed)),
                 context: ownContext
             )
             _ = try await diary.append(.activity(ActivityDiaryRecord(
@@ -207,14 +216,17 @@ final class ContextMemoryEngineTests: XCTestCase {
         }
         let withHistoricalSelfCapture = await diary.allEntries()
         let replayWithoutSelfCapture = SemanticReplayBuilder().build(day: "legacy", entries: withHistoricalSelfCapture)
-        XCTAssertFalse(replayWithoutSelfCapture.moments.contains {
-            $0.title.contains("AgentOne") || ($0.detail?.contains("AgentOne") ?? false)
-        })
-        XCTAssertEqual(replayWithoutSelfCapture.moments.filter { $0.detail?.contains("已合并") == true }.count, 2)
-        XCTAssertEqual(HabitContextExtractor().extract(from: withHistoricalSelfCapture).first?.supportingSessionCount, 2)
-        XCTAssertEqual(withHistoricalSelfCapture.count, 59)
+        #expect(
+            !(replayWithoutSelfCapture.moments.contains {
+                $0.title.contains("AgentOne") || ($0.detail?.contains("AgentOne") ?? false)
+            }))
+        #expect(replayWithoutSelfCapture.moments.filter { $0.kind == .activity && $0.title.hasPrefix("Read ") }.count == 2)
+        #expect(HabitContextExtractor().extract(from: withHistoricalSelfCapture).first?.supportingSessionCount
+                == 2)
+        #expect(withHistoricalSelfCapture.count == 79)
     }
 
+    @Test
     func testShortReadingPauseRemainsSameSession() async throws {
         let diary = try AppendOnlyDiary()
         let engine = ContextMemoryEngine(diary: diary)
@@ -226,53 +238,111 @@ final class ContextMemoryEngineTests: XCTestCase {
         _ = try await engine.flushPendingActivity()
 
         let sessions = await activityRecords(in: diary).compactMap(\.session)
-        XCTAssertEqual(sessions.count, 1)
-        XCTAssertEqual(sessions.first?.eventCount, 2)
-        XCTAssertEqual(sessions.first?.duration, 75)
+        #expect(sessions.count == 1)
+        #expect(sessions.first?.eventCount == 2)
+        #expect(sessions.first?.duration == 75)
     }
 
+    @Test
     func testContextChangeClosesReadingAndStartsAnotherSession() async throws {
         let diary = try AppendOnlyDiary()
         let engine = ContextMemoryEngine(diary: diary)
         let base = Date(timeIntervalSince1970: 1_710_200_000)
-        let first = ActivityContext(applicationName: "Safari", windowTitle: "Paper A", windowIdentifier: "a", url: URL(string: "https://example.com/a"))
-        let second = ActivityContext(applicationName: "Safari", windowTitle: "Paper B", windowIdentifier: "b", url: URL(string: "https://example.com/b"))
+        let first = ActivityContext(
+            applicationName: "Safari",
+            windowTitle: "Paper A",
+            windowIdentifier: "a",
+            url: URL(string: "https://example.com/a")
+        )
+        let second = ActivityContext(
+            applicationName: "Safari",
+            windowTitle: "Paper B",
+            windowIdentifier: "b",
+            url: URL(string: "https://example.com/b")
+        )
 
-        _ = try await engine.record(ActivityEvent(timestamp: base, signal: .scrolled(axis: .vertical, delta: 60, phase: .changed), context: first))
-        let switched = try await engine.record(ActivityEvent(timestamp: base.addingTimeInterval(10), signal: .scrolled(axis: .vertical, delta: 70, phase: .began), context: second))
-        XCTAssertFalse(switched.appendedDiaryEntryIDs.isEmpty)
+        for index in 0..<5 {
+            _ = try await engine.record(ActivityEvent(
+                timestamp: base.addingTimeInterval(Double(index) * 2),
+                signal: .scrolled(axis: .vertical, delta: 60, phase: index == 0 ? .began : .changed),
+                context: first
+            ))
+        }
+        let switched = try await engine.record(ActivityEvent(
+            timestamp: base.addingTimeInterval(10),
+            signal: .scrolled(axis: .vertical, delta: 70, phase: .began),
+            context: second
+        ))
+        #expect(!(switched.appendedDiaryEntryIDs.isEmpty))
+        for index in 1..<5 {
+            _ = try await engine.record(ActivityEvent(
+                timestamp: base.addingTimeInterval(10 + Double(index) * 2),
+                signal: .scrolled(axis: .vertical, delta: 70, phase: index == 4 ? .ended : .changed),
+                context: second
+            ))
+        }
         _ = try await engine.flushPendingActivity()
 
         let sessions = await activityRecords(in: diary).compactMap(\.session)
-        XCTAssertEqual(sessions.count, 2)
-        XCTAssertEqual(sessions.map { $0.context.windowTitle }, ["Paper A", "Paper B"])
-        XCTAssertEqual(sessions.first?.endReason, .contextChanged)
+        #expect(sessions.count == 2)
+        #expect(sessions.map { $0.context.windowTitle } == ["Paper A", "Paper B"])
+        #expect(sessions.first?.endReason == .contextChanged)
     }
 
-    func testTypingAndIdleCloseReadingButReturnRemainsIndependentEvidence() async throws {
+    @Test
+    func testTypingAndIdleCloseReadingWhileReturnKeepsIndependentEvidence() async throws {
         let diary = try AppendOnlyDiary()
         let engine = ContextMemoryEngine(diary: diary)
         let base = Date(timeIntervalSince1970: 1_710_300_000)
-        let context = ActivityContext(applicationName: "Notes", windowTitle: "Research notes", contentSummary: "A complete product opinion")
+        let context = ActivityContext(
+            applicationName: "Notes",
+            windowTitle: "Research notes",
+            contentSummary: "A complete product opinion"
+        )
 
-        _ = try await engine.record(ActivityEvent(timestamp: base, signal: .scrolled(axis: .vertical, delta: 90, phase: .changed), context: context))
-        _ = try await engine.record(ActivityEvent(timestamp: base.addingTimeInterval(10), signal: .keyboard(.typingStarted), context: context))
-        _ = try await engine.record(ActivityEvent(timestamp: base.addingTimeInterval(20), signal: .scrolled(axis: .vertical, delta: 40, phase: .changed), context: context))
-        _ = try await engine.record(ActivityEvent(timestamp: base.addingTimeInterval(25), signal: .idleStarted, context: context))
-        _ = try await engine.record(ActivityEvent(timestamp: base.addingTimeInterval(30), signal: .keyboard(.returnPressed), context: context))
+        for index in 0..<5 {
+            _ = try await engine.record(ActivityEvent(
+                timestamp: base.addingTimeInterval(Double(index) * 2),
+                signal: .scrolled(axis: .vertical, delta: 90, phase: index == 0 ? .began : .changed),
+                context: context
+            ))
+        }
+        _ = try await engine.record(ActivityEvent(
+            timestamp: base.addingTimeInterval(10),
+            signal: .keyboard(.typingStarted),
+            context: context
+        ))
+        for index in 0..<5 {
+            _ = try await engine.record(ActivityEvent(
+                timestamp: base.addingTimeInterval(20 + Double(index) * 2),
+                signal: .scrolled(axis: .vertical, delta: 40, phase: index == 0 ? .began : .changed),
+                context: context
+            ))
+        }
+        _ = try await engine.record(ActivityEvent(
+            timestamp: base.addingTimeInterval(30),
+            signal: .idleStarted,
+            context: context
+        ))
+        _ = try await engine.record(ActivityEvent(
+            timestamp: base.addingTimeInterval(35),
+            signal: .keyboard(.returnPressed),
+            context: context
+        ))
 
         let records = await activityRecords(in: diary)
         let sessions = records.compactMap(\.session)
-        XCTAssertEqual(sessions.count, 2)
-        XCTAssertEqual(sessions.map(\.endReason), [.activityChanged, .becameIdle])
-        XCTAssertTrue(records.contains { $0.event.semantics.contains(.opinionOutput) && $0.session == nil })
+        #expect(sessions.count == 4)
+        #expect(sessions.map(\.endReason) == [.activityChanged, .activityChanged, .becameIdle, .semanticMilestone])
+        #expect(records.allSatisfy { $0.session != nil })
         let entries = await diary.allEntries()
-        XCTAssertTrue(entries.contains { entry in
+        #expect(entries.contains { entry in
             guard case .evidence(let evidence) = entry.payload else { return false }
             return evidence.title == "A thought was expressed"
         })
     }
 
+    @Test
     func testEveryScrollStillFeedsDriftStateMachineWhileDiaryIsDeduplicated() async throws {
         let diary = try AppendOnlyDiary()
         let engine = ContextMemoryEngine(
@@ -288,18 +358,34 @@ final class ContextMemoryEngineTests: XCTestCase {
         let detour = ActivityContext(windowTitle: "Short videos", semanticTags: ["video", "comedy"])
         _ = try await engine.beginIntent(title: "Write paper", summary: "paper writing", context: writing, at: base)
 
-        _ = try await engine.record(ActivityEvent(timestamp: base.addingTimeInterval(1), signal: .scrolled(axis: .vertical, delta: 10, phase: .began), context: detour))
-        let reminder = try await engine.record(ActivityEvent(timestamp: base.addingTimeInterval(25), signal: .scrolled(axis: .vertical, delta: 10, phase: .changed), context: detour))
+        var reminderOutput: ContextEngineOutput?
+        var finalOutput: ContextEngineOutput?
+        for (index, offset) in [1.0, 3.5, 6.0, 8.5, 11.0, 13.5, 16.0, 18.5, 21.0, 25.0].enumerated() {
+            let output = try await engine.record(ActivityEvent(
+                timestamp: base.addingTimeInterval(offset),
+                signal: .scrolled(
+                    axis: .vertical,
+                    delta: 10,
+                    phase: index == 0 ? .began : (index == 9 ? .ended : .changed)
+                ),
+                context: detour
+            ))
+            if !output.prompts.reminderLevels.isEmpty { reminderOutput = output }
+            finalOutput = output
+        }
+        let reminder = try #require(reminderOutput)
+        let final = try #require(finalOutput)
 
-        XCTAssertEqual(reminder.prompts.reminderLevels, [1])
-        XCTAssertEqual(reminder.activeDriftDurationSeconds, 24)
+        #expect(reminder.prompts.reminderLevels == [1])
+        #expect(final.activeDriftDurationSeconds == 24)
         let beforeFlush = await activityRecords(in: diary)
-        XCTAssertEqual(beforeFlush.count, 0)
+        #expect(beforeFlush.count == 0)
         _ = try await engine.flushPendingActivity()
         let afterFlush = await activityRecords(in: diary)
-        XCTAssertEqual(afterFlush.count, 1)
+        #expect(afterFlush.count == 1)
     }
 
+    @Test
     func testSensitiveReadingNeverBecomesSessionOrHabit() async throws {
         let diary = try AppendOnlyDiary()
         let engine = ContextMemoryEngine(diary: diary)
@@ -321,33 +407,51 @@ final class ContextMemoryEngineTests: XCTestCase {
 
         let records = await activityRecords(in: diary)
         let habits = await engine.habitContexts()
-        XCTAssertEqual(records.count, 0)
-        XCTAssertTrue(habits.isEmpty)
+        #expect(records.count == 0)
+        #expect(habits.isEmpty)
     }
 
+    @Test
     func testHabitContextIsVisibleAfterSessionsAndConfidenceGrowsWithEvidence() async throws {
         let diary = try AppendOnlyDiary()
         let engine = ContextMemoryEngine(diary: diary)
         let base = Date(timeIntervalSince1970: 1_710_600_000)
-        let context = ActivityContext(applicationName: "Safari", windowTitle: "Research paper", url: URL(string: "https://example.com/paper"))
+        let context = ActivityContext(
+            applicationName: "Safari",
+            windowTitle: "Research paper",
+            url: URL(string: "https://example.com/paper")
+        )
 
-        _ = try await engine.record(ActivityEvent(timestamp: base, signal: .scrolled(axis: .vertical, delta: 50, phase: .changed), context: context))
+        for index in 0..<5 {
+            _ = try await engine.record(ActivityEvent(
+                timestamp: base.addingTimeInterval(Double(index) * 2),
+                signal: .scrolled(axis: .vertical, delta: 50, phase: index == 0 ? .began : .changed),
+                context: context
+            ))
+        }
         _ = try await engine.flushPendingActivity()
         let emergingHabits = await engine.habitContexts()
-        let emerging = try XCTUnwrap(emergingHabits.first)
-        XCTAssertEqual(emerging.supportingSessionCount, 1)
-        XCTAssertLessThan(emerging.confidence, 0.5)
+        let emerging = try #require(emergingHabits.first)
+        #expect(emerging.supportingSessionCount == 1)
+        #expect(emerging.confidence < 0.5)
 
-        _ = try await engine.record(ActivityEvent(timestamp: base.addingTimeInterval(600), signal: .scrolled(axis: .vertical, delta: 70, phase: .changed), context: context))
+        for index in 0..<5 {
+            _ = try await engine.record(ActivityEvent(
+                timestamp: base.addingTimeInterval(600 + Double(index) * 2),
+                signal: .scrolled(axis: .vertical, delta: 70, phase: index == 0 ? .began : .changed),
+                context: context
+            ))
+        }
         _ = try await engine.flushPendingActivity()
         let learnedHabits = await engine.habitContexts()
-        let learned = try XCTUnwrap(learnedHabits.first)
-        XCTAssertEqual(learned.supportingSessionCount, 2)
-        XCTAssertGreaterThan(learned.confidence, emerging.confidence)
-        XCTAssertEqual(learned.evidenceEntryIDs.count, 2)
-        XCTAssertTrue(learned.summary.contains("2 段独立阅读"))
+        let learned = try #require(learnedHabits.first)
+        #expect(learned.supportingSessionCount == 2)
+        #expect(learned.confidence > emerging.confidence)
+        #expect(learned.evidenceEntryIDs.count == 2)
+        #expect(learned.summary.contains("2 段独立阅读"))
     }
 
+    @Test
     func testDriftReminderEscalatesUsingConfiguredDurationsThenRecordsReturn() async throws {
         let diary = try AppendOnlyDiary(timeZone: TimeZone(secondsFromGMT: 0)!)
         let drift = DriftConfiguration(
@@ -382,23 +486,56 @@ final class ContextMemoryEngineTests: XCTestCase {
             at: base
         )
 
-        _ = try await engine.record(ActivityEvent(timestamp: base.addingTimeInterval(10), signal: .windowFocused(windowIdentifier: "video"), context: video))
-        let levelOne = try await engine.record(ActivityEvent(timestamp: base.addingTimeInterval(41), signal: .scrolled(axis: .vertical, delta: 200, phase: .changed), context: video))
-        let levelTwo = try await engine.record(ActivityEvent(timestamp: base.addingTimeInterval(71), signal: .scrolled(axis: .vertical, delta: 200, phase: .changed), context: video))
-        let returned = try await engine.record(ActivityEvent(timestamp: base.addingTimeInterval(80), signal: .keyboard(.typingStarted), context: writing))
+        _ = try await engine.record(ActivityEvent(
+            timestamp: base.addingTimeInterval(10),
+            signal: .windowFocused(windowIdentifier: "video"),
+            context: video
+        ))
+        let levelOne = try await engine.record(ActivityEvent(
+            timestamp: base.addingTimeInterval(41),
+            signal: .scrolled(axis: .vertical, delta: 200, phase: .changed),
+            context: video
+        ))
+        let levelTwo = try await engine.record(ActivityEvent(
+            timestamp: base.addingTimeInterval(71),
+            signal: .scrolled(axis: .vertical, delta: 200, phase: .changed),
+            context: video
+        ))
+        let returnCandidate = try await engine.record(ActivityEvent(
+            timestamp: base.addingTimeInterval(80),
+            signal: .keyboard(.typingStarted),
+            context: writing
+        ))
+        let returned = try await engine.record(ActivityEvent(
+            timestamp: base.addingTimeInterval(90),
+            signal: .keyboard(.typingBurst(estimatedCharacterCount: 8)),
+            context: writing
+        ))
 
-        XCTAssertEqual(levelOne.prompts.reminderLevels, [1])
-        XCTAssertEqual(levelTwo.prompts.reminderLevels, [2])
-        XCTAssertTrue(returned.prompts.contains { prompt in
+        #expect(levelOne.prompts.reminderLevels == [1])
+        #expect(levelTwo.prompts.reminderLevels == [2])
+        #expect(
+            !(returnCandidate.prompts.contains { prompt in
+                if case .returnedToIntent = prompt { return true }
+                return false
+            }))
+        #expect(returned.prompts.contains { prompt in
             if case .returnedToIntent = prompt { return true }
             return false
         })
 
         let entries = await diary.allEntries()
-        XCTAssertTrue(entries.contains { if case .driftStarted = $0.payload { return true }; return false })
-        XCTAssertTrue(entries.contains { if case .returnedToIntent = $0.payload { return true }; return false })
+        #expect(entries.contains {
+            if case .driftStarted = $0.payload { return true }
+            return false
+        })
+        #expect(entries.contains {
+            if case .returnedToIntent = $0.payload { return true }
+            return false
+        })
     }
 
+    @Test
     func testFeedbackCreatesSkillAndChangesFutureRelevance() async throws {
         let diary = try AppendOnlyDiary()
         let engine = ContextMemoryEngine(diary: diary)
@@ -425,13 +562,14 @@ final class ContextMemoryEngineTests: XCTestCase {
         ))
         let after = try await engine.record(ActivityEvent(timestamp: base.addingTimeInterval(3), signal: .contentChanged, context: detour))
 
-        XCTAssertNotNil(skill)
-        XCTAssertEqual(skill?.domain, .intentDetection)
-        XCTAssertGreaterThan(after.relevance ?? 0, before.relevance ?? 1)
+        #expect(skill != nil)
+        #expect(skill?.domain == .intentDetection)
+        #expect(after.relevance ?? 0 > before.relevance ?? 1)
         let skills = await engine.skills()
-        XCTAssertEqual(skills.count, 1)
+        #expect(skills.count == 1)
     }
 
+    @Test
     func testAppendOnlyDiaryPreservesOriginalWhileCorrectionAndHideAreAppended() async throws {
         let diary = try AppendOnlyDiary()
         let original = try await diary.append(.daySummary("Agent initially misunderstood the activity."))
@@ -450,15 +588,17 @@ final class ContextMemoryEngineTests: XCTestCase {
 
         let all = await diary.allEntries()
         let projection = await diary.projection()
-        XCTAssertEqual(all.count, 3)
-        XCTAssertEqual(all.first, original)
-        XCTAssertNotEqual(correction.id, original.id)
-        XCTAssertNotEqual(hidden.id, original.id)
-        XCTAssertTrue(projection.hiddenEntryIDs.contains(original.id))
-        XCTAssertEqual(projection.correctionsByEntryID[original.id]?.first?.correction, "It was related research, not distraction.")
-        XCTAssertFalse(projection.visibleEntries.contains(where: { $0.id == original.id }))
+        #expect(all.count == 3)
+        #expect(all.first == original)
+        #expect(correction.id != original.id)
+        #expect(hidden.id != original.id)
+        #expect(projection.hiddenEntryIDs.contains(original.id))
+        #expect(projection.correctionsByEntryID[original.id]?.first?.correction
+                == "It was related research, not distraction.")
+        #expect(!(projection.visibleEntries.contains(where: { $0.id == original.id })))
     }
 
+    @Test
     func testContextEnrichmentMergesIntoPendingActivityWithoutExtraDiaryRow() async throws {
         let diary = try AppendOnlyDiary()
         let engine = ContextMemoryEngine(diary: diary)
@@ -495,19 +635,24 @@ final class ContextMemoryEngineTests: XCTestCase {
             matching: rawContext,
             at: base.addingTimeInterval(9)
         )
-        XCTAssertEqual(result, .mergedIntoPending)
+        #expect(result == .mergedIntoPending)
 
         _ = try await engine.flushPendingActivity(reason: .explicitFlush)
         let entries = await diary.allEntries()
-        XCTAssertFalse(entries.contains { if case .contextEnrichment = $0.payload { return true }; return false })
+        #expect(
+            !(entries.contains {
+                if case .contextEnrichment = $0.payload { return true }
+                return false
+            }))
         let record = entries.compactMap { entry -> ActivityDiaryRecord? in
             guard case .activity(let record) = entry.payload else { return nil }
             return record
         }.first
-        XCTAssertEqual(record?.session?.context.contentSummary, enrichedContext.contentSummary)
-        XCTAssertEqual(record?.session?.context.semanticTags.contains("transformer"), true)
+        #expect(record?.session?.context.contentSummary == enrichedContext.contentSummary)
+        #expect(record?.session?.context.semanticTags.contains("transformer") == true)
     }
 
+    @Test
     func testLateContextEnrichmentAppendsAuditFactAndProjectsOntoOriginalReplayMoment() async throws {
         let temporary = FileManager.default.temporaryDirectory
             .appendingPathComponent("AgentOneLateEnrichmentTests-\(UUID().uuidString)", isDirectory: true)
@@ -539,7 +684,11 @@ final class ContextMemoryEngineTests: XCTestCase {
         _ = try await engine.flushPendingActivity(reason: .explicitFlush)
 
         let originalEntries = await diary.allEntries()
-        let originalActivity = try XCTUnwrap(originalEntries.first { if case .activity = $0.payload { return true }; return false })
+        let originalActivity = try #require(
+            originalEntries.first {
+                if case .activity = $0.payload { return true }
+                return false
+            })
         var enrichedContext = rawContext
         enrichedContext.contentSummary = "阅读 zloop 的业务背景，了解 Runtime、APIHub 与企业 Context 挂接方案"
         enrichedContext.selectedText = "zloop 是一套企业级解决方案"
@@ -553,40 +702,42 @@ final class ContextMemoryEngineTests: XCTestCase {
             at: base.addingTimeInterval(15)
         )
         guard case .appended(let enrichmentEntry) = result else {
-            return XCTFail("Late enrichment was not appended: \(result)")
+            Issue.record("Late enrichment was not appended: \(result)")
+            return
         }
 
         let persistedEntries = await diary.allEntries()
-        XCTAssertEqual(persistedEntries.first(where: { $0.id == originalActivity.id }), originalActivity)
-        XCTAssertTrue(persistedEntries.contains(where: { $0.id == enrichmentEntry.id }))
-        let enrichment = try XCTUnwrap(persistedEntries.compactMap { entry -> ActivityContextEnrichment? in
+        #expect(persistedEntries.first(where: { $0.id == originalActivity.id }) == originalActivity)
+        #expect(persistedEntries.contains(where: { $0.id == enrichmentEntry.id }))
+        let enrichment = try #require(persistedEntries.compactMap { entry -> ActivityContextEnrichment? in
             guard case .contextEnrichment(let enrichment) = entry.payload else { return nil }
             return enrichment
         }.first)
-        XCTAssertEqual(enrichment.targetActivityEntryID, originalActivity.id)
-        XCTAssertEqual(enrichment.targetEventID, firstEvent.id)
+        #expect(enrichment.targetActivityEntryID == originalActivity.id)
+        #expect(enrichment.targetEventID == firstEvent.id)
 
         let replay = await engine.replay(for: base)
         let activities = replay.moments.filter { $0.kind == .activity }
-        XCTAssertEqual(activities.count, 1)
-        XCTAssertEqual(activities.first?.title, "阅读 zloop 企业级解决方案")
-        XCTAssertTrue(activities.first?.detail?.contains("Runtime、APIHub") == true)
-        XCTAssertTrue(activities.first?.detail?.contains("https://zhuanspirit.feishu.cn/wiki/example") == true)
+        #expect(activities.count == 1)
+        #expect(activities.first?.title == "阅读 zloop 企业级解决方案")
+        #expect(activities.first?.detail?.contains("Runtime、APIHub") == true)
+        #expect(activities.first?.detail?.contains("https://zhuanspirit.feishu.cn/wiki/example") == true)
 
         let day = await diary.dayKey(for: base)
         let markdown = try String(contentsOf: temporary.appendingPathComponent("Daily/\(day).md"), encoding: .utf8)
-        XCTAssertTrue(markdown.contains("Context understood"))
-        XCTAssertTrue(markdown.contains(originalActivity.id.uuidString))
-        XCTAssertTrue(markdown.contains("阅读 zloop 企业级解决方案"))
+        #expect(markdown.contains("Context understood"))
+        #expect(markdown.contains(originalActivity.id.uuidString))
+        #expect(markdown.contains("阅读 zloop 企业级解决方案"))
 
         let reloaded = try AppendOnlyDiary(homeURL: temporary, timeZone: utc)
         let reloadedEntries = await reloaded.allEntries()
-        XCTAssertEqual(reloadedEntries, persistedEntries)
+        #expect(reloadedEntries == persistedEntries)
         let reloadedReplay = SemanticReplayBuilder().build(day: day, entries: reloadedEntries)
-        XCTAssertEqual(reloadedReplay.moments.filter { $0.kind == .activity }.count, 1)
-        XCTAssertEqual(reloadedReplay.moments.first(where: { $0.kind == .activity })?.title, "阅读 zloop 企业级解决方案")
+        #expect(reloadedReplay.moments.filter { $0.kind == .activity }.count == 1)
+        #expect(reloadedReplay.moments.first(where: { $0.kind == .activity })?.title == "阅读 zloop 企业级解决方案")
     }
 
+    @Test
     func testSensitiveContextEnrichmentIsRejectedWithoutPersistence() async throws {
         let diary = try AppendOnlyDiary()
         let engine = ContextMemoryEngine(diary: diary)
@@ -598,11 +749,12 @@ final class ContextMemoryEngineTests: XCTestCase {
             summary: "Must never persist",
             matching: sensitive
         )
-        XCTAssertEqual(result, .rejectedSensitive)
+        #expect(result == .rejectedSensitive)
         let entries = await diary.allEntries()
-        XCTAssertTrue(entries.isEmpty)
+        #expect(entries.isEmpty)
     }
 
+    @Test
     func testMarkdownPersistenceAndSemanticReplayExposeBothUserAndAgentLanes() async throws {
         let temporary = FileManager.default.temporaryDirectory
             .appendingPathComponent("AgentOneCoreTests-\(UUID().uuidString)", isDirectory: true)
@@ -631,19 +783,20 @@ final class ContextMemoryEngineTests: XCTestCase {
         let markdownURL = temporary.appendingPathComponent("Daily/\(day).md")
         let markdown = try String(contentsOf: markdownURL, encoding: .utf8)
 
-        XCTAssertTrue(markdown.contains("A thought was expressed"))
-        XCTAssertTrue(markdown.contains("Inside AgentOne"))
-        XCTAssertTrue(markdown.contains("agentone-json"))
-        XCTAssertTrue(replay.moments.contains(where: { $0.lane == .userActivity }))
-        XCTAssertTrue(replay.moments.contains(where: { $0.lane == .agentMind }))
-        XCTAssertTrue(replay.evidence.contains(where: { $0.kind == .selectedText }))
+        #expect(markdown.contains("A thought was expressed"))
+        #expect(markdown.contains("Inside AgentOne"))
+        #expect(markdown.contains("agentone-json"))
+        #expect(replay.moments.contains(where: { $0.lane == .userActivity }))
+        #expect(replay.moments.contains(where: { $0.lane == .agentMind }))
+        #expect(replay.evidence.contains(where: { $0.kind == .selectedText }))
 
         let reloadedDiary = try AppendOnlyDiary(homeURL: temporary, timeZone: utc)
         let reloadedEntries = await reloadedDiary.allEntries()
         let originalEntries = await diary.allEntries()
-        XCTAssertEqual(reloadedEntries, originalEntries)
+        #expect(reloadedEntries == originalEntries)
     }
 
+    @Test
     func testWeeklyAggregationSkeletonCountsCoreOutcomes() async throws {
         let diary = try AppendOnlyDiary()
         let start = Date(timeIntervalSince1970: 1_700_300_000)
@@ -660,11 +813,12 @@ final class ContextMemoryEngineTests: XCTestCase {
             end: start.addingTimeInterval(3600)
         )
 
-        XCTAssertEqual(aggregate.successfulReturns, 1)
-        XCTAssertEqual(aggregate.learnedSkillCount, 1)
-        XCTAssertTrue(aggregate.highlights.contains("Made meaningful progress."))
+        #expect(aggregate.successfulReturns == 1)
+        #expect(aggregate.learnedSkillCount == 1)
+        #expect(aggregate.highlights.contains("Made meaningful progress."))
     }
 
+    @Test
     func testDailyContextDigestPersistsAsStructuredAppendOnlyMemory() async throws {
         let temporary = FileManager.default.temporaryDirectory
             .appendingPathComponent("AgentOneDigestTests-\(UUID().uuidString)", isDirectory: true)
@@ -692,25 +846,27 @@ final class ContextMemoryEngineTests: XCTestCase {
         _ = try await engine.addDailyContextDigest(digest, at: time)
 
         let replay = await engine.replay(for: time)
-        XCTAssertEqual(replay.moments.last?.dailyDigest, digest)
+        #expect(replay.moments.last?.dailyDigest == digest)
         let latestDigest = await engine.latestDailyContextDigest(for: time)
-        XCTAssertEqual(latestDigest, digest)
+        #expect(latestDigest == digest)
         let markdown = try String(
             contentsOf: temporary.appendingPathComponent("Daily/\(day).md"),
             encoding: .utf8
         )
-        XCTAssertTrue(markdown.contains("Daily Context distilled"))
-        XCTAssertTrue(markdown.contains("LUMA 留下的一句话"))
-        XCTAssertTrue(markdown.contains("我记住了你不接受只有壳子的功能"))
+        #expect(markdown.contains("Daily Context distilled"))
+        #expect(markdown.contains("LUMA 留下的一句话"))
+        #expect(markdown.contains("我记住了你不接受只有壳子的功能"))
 
         let reloaded = try AppendOnlyDiary(homeURL: temporary, timeZone: utc)
         let reloadedEntry = await reloaded.allEntries().last
         guard case .dailyContextDigest(let reloadedDigest) = reloadedEntry?.payload else {
-            return XCTFail("Structured daily digest did not survive reload")
+            Issue.record("Structured daily digest did not survive reload")
+            return
         }
-        XCTAssertEqual(reloadedDigest, digest)
+        #expect(reloadedDigest == digest)
     }
 
+    @Test
     func testAllReplaysAndPersistedSkillsRestoreAcrossDays() async throws {
         let temporary = FileManager.default.temporaryDirectory
             .appendingPathComponent("AgentOneLibraryProjectionTests-\(UUID().uuidString)", isDirectory: true)
@@ -736,18 +892,19 @@ final class ContextMemoryEngineTests: XCTestCase {
 
         let engine = ContextMemoryEngine(diary: diary)
         let replays = await engine.allReplays()
-        XCTAssertEqual(replays.map(\.day), [firstDayKey, secondDayKey])
-        XCTAssertEqual(replays.count, 2)
+        #expect(replays.map(\.day) == [firstDayKey, secondDayKey])
+        #expect(replays.count == 2)
 
         let reloadedDiary = try AppendOnlyDiary(homeURL: temporary, timeZone: utc)
         let reloadedEngine = ContextMemoryEngine(diary: reloadedDiary)
         await reloadedEngine.restorePersistedSkills()
         let restoredSkills = await reloadedEngine.persistedSkills()
-        XCTAssertEqual(restoredSkills.map(\.name), [skill.name])
-        XCTAssertEqual(restoredSkills.first?.revision, 2)
-        XCTAssertEqual(await reloadedEngine.recordedDays(), [firstDayKey, secondDayKey])
+        #expect(restoredSkills.map(\.name) == [skill.name])
+        #expect(restoredSkills.first?.revision == 2)
+        #expect(await reloadedEngine.recordedDays() == [firstDayKey, secondDayKey])
     }
 
+    @Test
     func testProactiveCompanionWaitsForARealLowInterruptionOpportunity() {
         let now = Date(timeIntervalSince1970: 1_722_830_400)
         let policy = ProactiveCompanionPolicy()
@@ -758,21 +915,21 @@ final class ContextMemoryEngineTests: XCTestCase {
             alreadyInvitedForDigest: false,
             timeZone: TimeZone(secondsFromGMT: 8 * 3600)!
         )
-        XCTAssertNil(policy.opportunity(for: busy))
+        #expect(policy.opportunity(for: busy) == nil)
 
         var idle = busy
         idle.secondsSinceLastInteraction = 120
-        XCTAssertEqual(policy.opportunity(for: idle), .inviteDailyReview)
+        #expect(policy.opportunity(for: idle) == .inviteDailyReview)
 
         idle.alreadyInvitedForDigest = true
-        XCTAssertNil(policy.opportunity(for: idle))
+        #expect(policy.opportunity(for: idle) == nil)
 
         var leisure = busy
         leisure.leisureContextDuration = 6 * 60
-        XCTAssertEqual(policy.opportunity(for: leisure), .inviteDailyReview)
+        #expect(policy.opportunity(for: leisure) == .inviteDailyReview)
 
         leisure.isSensitiveContext = true
-        XCTAssertNil(policy.opportunity(for: leisure))
+        #expect(policy.opportunity(for: leisure) == nil)
     }
 }
 
@@ -783,8 +940,8 @@ private func activityRecords(in diary: AppendOnlyDiary) async -> [ActivityDiaryR
     }
 }
 
-private extension Array where Element == AgentPrompt {
-    var reminderLevels: [Int] {
+extension Array where Element == AgentPrompt {
+    fileprivate var reminderLevels: [Int] {
         compactMap { prompt in
             if case .reminder(let stage, _, _) = prompt { return stage.level }
             return nil

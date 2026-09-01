@@ -161,6 +161,7 @@ final class SystemSignalMonitor: ObservableObject {
 
         switch signal.kind {
         case .primaryClick:
+            keyboardTap?.resetTypingSession()
             emit(.primaryClick, metadata: signal.metadata, timestamp: signal.timestamp)
         case .secondaryClick:
             emit(.secondaryClick, metadata: signal.metadata, timestamp: signal.timestamp)
@@ -213,6 +214,7 @@ final class SystemSignalMonitor: ObservableObject {
         applicationName: String?,
         bundleIdentifier: String?
     ) {
+        keyboardTap?.resetTypingSession()
         let signal = SystemActivitySignal(
             timestamp: Date(),
             kind: .applicationChanged,

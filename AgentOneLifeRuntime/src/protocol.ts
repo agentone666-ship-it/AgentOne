@@ -107,7 +107,7 @@ export interface RuntimeUsage {
 }
 
 export interface RuntimeModelExecution {
-  route: "offline" | "cloud";
+  route: "offline" | "local" | "cloud";
   provider: string;
   model: string;
 }
@@ -119,7 +119,7 @@ export type RuntimeResponse =
       type: "ready";
       payload: {
         runtime: "pi-agent-core";
-        runtimeMode: "offline-faux" | "cloud";
+        runtimeMode: "offline-faux" | "local" | "cloud";
         provider: string;
         model: string;
         piVersion: string;

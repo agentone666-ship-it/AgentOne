@@ -77,6 +77,12 @@ final class FloatingCompanionController: ObservableObject {
         isVisible = false
     }
 
+    func stop() {
+        (panel as? CompanionPanel)?.stopMousePassThroughMonitoring()
+        panel?.orderOut(nil)
+        isVisible = false
+    }
+
     func toggle() {
         isVisible ? hide() : show()
     }
@@ -541,21 +547,41 @@ private extension NSRect {
 private final class CompanionPanel: NSPanel {
     var interactivePointProvider: ((NSPoint) -> Bool)?
     var capturesMouseInteraction = false
-    private var mousePassThroughTimer: Timer?
+    private var globalMouseMovementMonitor: Any?
+    private var localMouseMovementMonitor: Any?
+    private let mouseMovementThrottle = MouseMovementThrottle(minimumInterval: 1 / 30)
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
     func startMousePassThroughMonitoring() {
-        guard mousePassThroughTimer == nil else { return }
-        let timer = Timer(timeInterval: 1 / 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
+        guard globalMouseMovementMonitor == nil, localMouseMovementMonitor == nil else { return }
+        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
+        let throttle = mouseMovementThrottle
+        globalMouseMovementMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] _ in
+            guard throttle.shouldForward() else { return }
+            Task { @MainActor in
                 self?.refreshMousePassThrough()
             }
         }
-        RunLoop.main.add(timer, forMode: .common)
-        mousePassThroughTimer = timer
+        localMouseMovementMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
+            if throttle.shouldForward() {
+                self?.refreshMousePassThrough()
+            }
+            return event
+        }
         refreshMousePassThrough()
+    }
+
+    func stopMousePassThroughMonitoring() {
+        if let globalMouseMovementMonitor {
+            NSEvent.removeMonitor(globalMouseMovementMonitor)
+        }
+        if let localMouseMovementMonitor {
+            NSEvent.removeMonitor(localMouseMovementMonitor)
+        }
+        globalMouseMovementMonitor = nil
+        localMouseMovementMonitor = nil
     }
 
     func refreshMousePassThrough() {
@@ -570,6 +596,28 @@ private final class CompanionPanel: NSPanel {
             y: NSEvent.mouseLocation.y - frame.minY
         )
         ignoresMouseEvents = !(interactivePointProvider?(point) ?? false)
+    }
+}
+
+/// Global AppKit monitors are not actor-isolated. Throttle there, before a
+/// main-actor task is created, so rapid pointer movement cannot queue hundreds
+/// of pass-through refreshes behind the user's foreground work.
+private final class MouseMovementThrottle: @unchecked Sendable {
+    private let lock = NSLock()
+    private let minimumInterval: TimeInterval
+    private var lastForwardedUptime = -Double.infinity
+
+    init(minimumInterval: TimeInterval) {
+        self.minimumInterval = minimumInterval
+    }
+
+    func shouldForward() -> Bool {
+        let uptime = ProcessInfo.processInfo.systemUptime
+        lock.lock()
+        defer { lock.unlock() }
+        guard uptime - lastForwardedUptime >= minimumInterval else { return false }
+        lastForwardedUptime = uptime
+        return true
     }
 }
 

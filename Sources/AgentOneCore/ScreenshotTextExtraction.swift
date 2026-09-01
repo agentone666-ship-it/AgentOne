@@ -291,6 +291,9 @@ public enum ScreenshotTextExtraction {
 
     private static func looksLikeWindowChrome(_ text: String) -> Bool {
         let normalized = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        if ReturnInputCaptureContract.isLikelyInterfaceChrome(normalized) {
+            return true
+        }
         if normalized.contains("完全访问") || normalized.contains("full access") {
             return true
         }

@@ -5,6 +5,11 @@ import Foundation
 
 struct ActiveApplicationContext: Sendable {
     let capturedAt: Date
+    /// The process that owned the AX snapshot at capture time. Return capture
+    /// must keep this PID instead of querying the frontmost application again
+    /// from an asynchronous ScreenCaptureKit startup task: a system panel or
+    /// AgentOne's own floating UI can become frontmost in that small gap.
+    let processIdentifier: pid_t
     let applicationName: String
     let bundleIdentifier: String?
     let windowTitle: String?
@@ -17,6 +22,10 @@ struct ActiveApplicationContext: Sendable {
     /// UTF-16 offsets relative to `focusedText`, matching AX/NSString.
     let focusedSelectionRange: Range<Int>?
     let focusedRole: String?
+    /// Global Quartz frame of the focused window. Keeping this beside the
+    /// focused control lets Return capture reject a stale click in a sidebar
+    /// even when Electron exposes no editable AX role for its composer.
+    let windowFrame: CGRect?
     let focusedFrame: CGRect?
     /// A small global frame around the AX insertion point/selection. This lets
     /// Return capture reduce large editors and terminal scrollback surfaces to
@@ -73,6 +82,18 @@ enum ActiveContextReader {
 
     static func read(scope: Scope = .full) -> ActiveApplicationContext? {
         guard let application = NSWorkspace.shared.frontmostApplication else { return nil }
+        return read(application: application, scope: scope)
+    }
+
+    /// Reads a specific running application. Production callers normally use
+    /// `read(scope:)`; the explicit variant is also useful for validating the
+    /// exact WeChat/Feishu/Codex process without allowing the test runner or a
+    /// macOS system surface to replace the target between activation and AX
+    /// sampling.
+    static func read(
+        application: NSRunningApplication,
+        scope: Scope = .full
+    ) -> ActiveApplicationContext? {
         let appElement = AXUIElementCreateApplication(application.processIdentifier)
         let focusedWindow = elementAttribute(appElement, kAXFocusedWindowAttribute as String)
         let focusedElement = elementAttribute(appElement, kAXFocusedUIElementAttribute as String)
@@ -86,6 +107,7 @@ enum ActiveContextReader {
         let focusedRole = stringAttribute(focusedElement, kAXRoleAttribute as String)
         let focusedSubrole = stringAttribute(focusedElement, kAXSubroleAttribute as String)
         let secureInput = isSecure(role: focusedRole, subrole: focusedSubrole)
+        let windowFrame = frame(of: focusedWindow)
         let focusedFrame = secureInput ? nil : frame(of: focusedElement)
         let rawFocusedSelectionRange = secureInput ? nil : rangeAttribute(
             focusedElement,
@@ -159,6 +181,7 @@ enum ActiveContextReader {
 
         return ActiveApplicationContext(
             capturedAt: Date(),
+            processIdentifier: application.processIdentifier,
             applicationName: application.localizedName ?? "Unknown",
             bundleIdentifier: application.bundleIdentifier,
             windowTitle: windowTitle,
@@ -170,57 +193,47 @@ enum ActiveContextReader {
             focusedText: focusedText,
             focusedSelectionRange: focusedSelectionRange,
             focusedRole: focusedRole,
+            windowFrame: windowFrame,
             focusedFrame: focusedFrame,
             focusedCaretFrame: focusedCaretFrame,
             isSecureInput: secureInput
         )
     }
 
-    /// Resolves the control under a global AppKit mouse position without
+    /// Resolves the control under a global Quartz mouse position without
     /// assuming that a left click necessarily navigated. The runtime compares
     /// the surrounding Context after the click before adding navigation
     /// semantics.
-    static func interactionTarget(at appKitPoint: CGPoint) -> ActiveInteractionTarget? {
+    static func interactionTarget(at quartzPoint: CGPoint) -> ActiveInteractionTarget? {
         guard let application = NSWorkspace.shared.frontmostApplication else { return nil }
         let appElement = AXUIElementCreateApplication(application.processIdentifier)
-        let primaryHeight = NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.height
-            ?? NSScreen.main?.frame.height
-            ?? 0
-        let candidates = [
-            CGPoint(x: appKitPoint.x, y: primaryHeight - appKitPoint.y),
-            appKitPoint
-        ]
-
-        for point in candidates {
-            var rawElement: AXUIElement?
-            let result = AXUIElementCopyElementAtPosition(
-                appElement,
-                Float(point.x),
-                Float(point.y),
-                &rawElement
-            )
-            guard result == .success, let element = rawElement else { continue }
-            let role = stringAttribute(element, kAXRoleAttribute as String)
-            let subrole = stringAttribute(element, kAXSubroleAttribute as String)
-            guard !isSecure(role: role, subrole: subrole) else { return nil }
-            let title = bounded(
-                stringAttribute(element, kAXTitleAttribute as String)
-                    ?? stringAttribute(element, kAXDescriptionAttribute as String),
-                limit: 240
-            )
-            let value = bounded(meaningfulValue(of: element, role: role), limit: 240)
-            let url = urlAttribute(element, kAXURLAttribute as String)
-            let identifier = bounded(stringAttribute(element, "AXIdentifier"), limit: 160)
-            let target = ActiveInteractionTarget(
-                role: role,
-                title: title,
-                value: value,
-                url: url,
-                identifier: identifier
-            )
-            if target.summary != nil { return target }
-        }
-        return nil
+        var rawElement: AXUIElement?
+        let result = AXUIElementCopyElementAtPosition(
+            appElement,
+            Float(quartzPoint.x),
+            Float(quartzPoint.y),
+            &rawElement
+        )
+        guard result == .success, let element = rawElement else { return nil }
+        let role = stringAttribute(element, kAXRoleAttribute as String)
+        let subrole = stringAttribute(element, kAXSubroleAttribute as String)
+        guard !isSecure(role: role, subrole: subrole) else { return nil }
+        let title = bounded(
+            stringAttribute(element, kAXTitleAttribute as String)
+                ?? stringAttribute(element, kAXDescriptionAttribute as String),
+            limit: 240
+        )
+        let value = bounded(meaningfulValue(of: element, role: role), limit: 240)
+        let url = urlAttribute(element, kAXURLAttribute as String)
+        let identifier = bounded(stringAttribute(element, "AXIdentifier"), limit: 160)
+        let target = ActiveInteractionTarget(
+            role: role,
+            title: title,
+            value: value,
+            url: url,
+            identifier: identifier
+        )
+        return target.summary == nil ? nil : target
     }
 
     private static func collectVisibleText(

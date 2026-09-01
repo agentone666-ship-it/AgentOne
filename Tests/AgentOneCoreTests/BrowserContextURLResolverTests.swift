@@ -1,7 +1,9 @@
-import XCTest
+import Testing
 @testable import AgentOneCore
 
-final class BrowserContextURLResolverTests: XCTestCase {
+@Suite
+struct BrowserContextURLResolverTests {
+    @Test
     func testChromeAddressBarWinsOverLinksExposedByPage() {
         let candidates = [
             BrowserAddressBarCandidate(
@@ -23,9 +25,10 @@ final class BrowserContextURLResolverTests: XCTestCase {
             fallbackURLs: ["https://wrong.example/page"]
         )
 
-        XCTAssertEqual(url?.absoluteString, "https://arxiv.org/abs/1706.03762")
+        #expect(url?.absoluteString == "https://arxiv.org/abs/1706.03762")
     }
 
+    @Test
     func testSafariSmartSearchFieldIsRecognized() {
         let url = BrowserContextURLResolver.resolve(
             bundleIdentifier: "com.apple.Safari",
@@ -41,9 +44,10 @@ final class BrowserContextURLResolverTests: XCTestCase {
 
         // Fragments are not stable reading-session identity and may contain
         // private state, so they are removed before persistence.
-        XCTAssertEqual(url?.absoluteString, "https://example.com/paper")
+        #expect(url?.absoluteString == "https://example.com/paper")
     }
 
+    @Test
     func testSearchTextDoesNotBecomeAFakePageURL() {
         let url = BrowserContextURLResolver.resolve(
             bundleIdentifier: "com.google.Chrome",
@@ -58,17 +62,19 @@ final class BrowserContextURLResolverTests: XCTestCase {
             fallbackURLs: ["https://example.com/current"]
         )
 
-        XCTAssertEqual(url?.absoluteString, "https://example.com/current")
+        #expect(url?.absoluteString == "https://example.com/current")
     }
 
+    @Test
     func testSensitiveQueryItemsAreRemovedButPageIdentityRemains() {
         let url = BrowserContextURLResolver.normalizePageURL(
             "https://example.com/paper?chapter=2&access_token=secret&view=full#section"
         )
 
-        XCTAssertEqual(url?.absoluteString, "https://example.com/paper?chapter=2&view=full")
+        #expect(url?.absoluteString == "https://example.com/paper?chapter=2&view=full")
     }
 
+    @Test
     func testNonBrowserUsesPageFallbackWithoutAddressBarHeuristics() {
         let url = BrowserContextURLResolver.resolve(
             bundleIdentifier: "com.apple.Notes",
@@ -79,6 +85,6 @@ final class BrowserContextURLResolverTests: XCTestCase {
             fallbackURLs: ["https://example.com/document"]
         )
 
-        XCTAssertEqual(url?.absoluteString, "https://example.com/document")
+        #expect(url?.absoluteString == "https://example.com/document")
     }
 }

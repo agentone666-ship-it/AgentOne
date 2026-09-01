@@ -395,6 +395,17 @@ final class AgentOneRuntimeHealthStore: ObservableObject {
         case "no_concrete_context", "no_context": "当前只有泛化行为信号，没有足够的页面正文、网址或文档信息。"
         case "sensitive_context_blocked": "检测到密码、支付或安全输入，Context 已在模型请求前阻断。"
         case "local_model_unavailable": "本地模型尚未安装或不可用。"
+        case "local_resources_memory_pressure", "local_resources_available_memory",
+             "local_resources_memory_compression", "local_resources_swap_usage":
+            "系统内存比较紧张。Context 已保存，本地模型会等电脑空闲后再分析。"
+        case "local_resources_system_load":
+            "系统正在忙。Context 已保存，本地模型不会和前台应用抢 CPU。"
+        case "local_resources_thermal_state":
+            "电脑温度较高。Context 已保存，本地模型会在降温后再分析。"
+        case "local_resources_low_power_mode":
+            "电脑处于低电量模式。本地模型已暂停。"
+        case "local_resources_foreground_activity":
+            "你还在打字或操作电脑。Context 已保存，语义分析会延后到空闲时。"
         case "permission_unavailable": "系统权限不足，无法形成可发送给模型的具体 Context。"
         default: reason.isEmpty ? "运行时没有提供原因。" : reason
         }

@@ -848,8 +848,8 @@ struct AgentOneCoreHarness {
             windowFrame: window
         )
         try require(
-            fallbackRegions.allSatisfy { $0.source == .inferredComposerRegion && $0.area <= 0.30 },
-            "The no-Accessibility fallback was allowed to become full-window OCR."
+            fallbackRegions.isEmpty,
+            "Unanchored Return capture did not fail closed."
         )
 
         let userOpinion = "回车应该只识别当前输入框里的观点"
@@ -909,8 +909,8 @@ struct AgentOneCoreHarness {
 
         // Full-display OCR must refine a compact focused composer, never jump
         // to the just-sent bubble/history row that happens to contain the same
-        // words. Vision coordinates use a lower-left origin; the contract must
-        // still choose the mirrored candidate that overlaps the AX input box.
+        // words. Vision coordinates use a lower-left origin and must be flipped
+        // exactly once into the shared top-left screen/crop coordinate space.
         let compactInput = CGRect(x: 240, y: 680, width: 720, height: 72)
         let duplicateHistory = "这是用户刚刚在输入框里写下的观点，需要被准确捕获"
         let fullScreenLines = [
@@ -979,7 +979,7 @@ struct AgentOneCoreHarness {
             windowFrame: window,
             displayFrame: window,
             referenceText: duplicateHistory,
-            interactionPoint: CGPoint(x: 720, y: 80)
+            interactionPoint: CGPoint(x: 720, y: 720)
         )
         try require(!clickAnchoredRegions.isEmpty, "Click-anchored OCR produced no input ROI without Accessibility.")
         try require(
@@ -987,9 +987,9 @@ struct AgentOneCoreHarness {
             "Duplicate sidebar/history text escaped the click-anchor gate."
         )
         try require(
-            clickAnchoredRegions.contains(where: { $0.y < 0.20 })
-                && clickAnchoredRegions.contains(where: { $0.y > 0.70 }),
-            "The locator did not retain safe direct/mirrored crops around the clicked composer."
+            clickAnchoredRegions.count == 1
+                && clickAnchoredRegions.allSatisfy { $0.y > 0.70 },
+            "The locator emitted a mirrored top-window crop for the clicked composer."
         )
 
         // A compact AX element is not trustworthy when it conflicts with the
@@ -999,7 +999,7 @@ struct AgentOneCoreHarness {
             focusedFrame: CGRect(x: 28, y: 24, width: 280, height: 48),
             caretFrame: nil,
             windowFrame: window,
-            interactionPoint: CGPoint(x: 720, y: 80),
+            interactionPoint: CGPoint(x: 720, y: 720),
             interactionCoordinateFrame: window
         )
         try require(
@@ -1012,21 +1012,21 @@ struct AgentOneCoreHarness {
             "The click fallback expanded into a window/sidebar-sized region."
         )
 
-        // Global AppKit points and ScreenCaptureKit frames use opposite Y
-        // conventions. Mirroring must include a non-zero display origin so a
-        // secondary display does not shift the ROI by displayFrame.minY.
+        // The app converts pointer events into top-left Quartz coordinates
+        // before this contract. A non-zero display origin must remain intact
+        // without generating a second mirrored ROI.
         let offsetDisplay = CGRect(x: 0, y: 100, width: 1_600, height: 900)
         let offsetWindow = CGRect(x: 200, y: 650, width: 1_200, height: 300)
         let offsetRegions = ReturnInputCaptureContract.regions(
             focusedFrame: nil,
             caretFrame: nil,
             windowFrame: offsetWindow,
-            interactionPoint: CGPoint(x: 900, y: 180),
+            interactionPoint: CGPoint(x: 900, y: 900),
             interactionCoordinateFrame: offsetDisplay
         )
         try require(
-            offsetRegions.contains(where: { $0.y > 0.70 }),
-            "The click mirror ignored the display's non-zero Y origin."
+            offsetRegions.count == 1 && offsetRegions.allSatisfy { $0.y > 0.55 },
+            "The Quartz click anchor shifted on a display with a non-zero origin."
         )
         try require(
             offsetRegions.allSatisfy { $0.area < 0.30 },
@@ -1076,9 +1076,155 @@ struct AgentOneCoreHarness {
             "The caret-near editor line was not retained after full-screen location."
         )
 
+        // These application-profile checks run through the production Core
+        // executable, not just XCTest. They model the exact class of failures
+        // observed in the deployed app without embedding private screenshots.
+        try require(
+            ReturnInputComposerProfile.resolve(
+                bundleIdentifier: "com.tencent.xinWeChat",
+                applicationName: nil
+            ) == .weChat
+                && ReturnInputComposerProfile.resolve(
+                    bundleIdentifier: "com.openai.codex",
+                    applicationName: nil
+                ) == .codex
+                && ReturnInputComposerProfile.resolve(
+                    bundleIdentifier: "com.bytedance.macos.feishu",
+                    applicationName: nil
+                ) == .feishu,
+            "A production bundle identifier no longer resolved to its Return composer profile."
+        )
+
+        let weChatSubmission = "AGENTONE_WECHAT_RETURN_HARNESS"
+        let weChatSidebar = CGRect(x: 20, y: 42, width: 248, height: 42)
+        let weChatClick = CGPoint(x: 790, y: 720)
+        try require(
+            !ReturnInputComposerProfile.weChat.acceptsTrustedInputGeometry(
+                weChatSidebar,
+                in: window
+            )
+                && ReturnInputComposerProfile.weChat.validatesTypingAnchor(
+                    weChatClick,
+                    focusedFrame: weChatSidebar,
+                    caretFrame: nil,
+                    in: window
+                ),
+            "WeChat stale sidebar focus was not overridden by a validated composer click."
+        )
+        let weChatRecovery = ReturnInputCaptureContract.regionsFromFullScreenOCR(
+            lines: [
+                NormalizedOCRLine(
+                    text: weChatSubmission,
+                    x: 0.03, y: 0.18, width: 0.18, height: 0.035, confidence: 0.99
+                ),
+                NormalizedOCRLine(
+                    text: weChatSubmission,
+                    x: 0.63, y: 0.24, width: 0.28, height: 0.035, confidence: 0.93
+                )
+            ],
+            focusedFrame: weChatSidebar,
+            caretFrame: nil,
+            windowFrame: window,
+            displayFrame: window,
+            referenceText: weChatSubmission,
+            interactionPoint: weChatClick,
+            profile: .weChat
+        )
+        try require(
+            weChatRecovery.count == 1
+                && weChatRecovery.allSatisfy {
+                    $0.source == .inferredComposerRegion
+                        && $0.x > 0.55
+                        && $0.width < 0.40
+                        && $0.y > 0.65
+                },
+            "WeChat Return recovery crossed into the conversation sidebar or widened across the sent bubble and toolbar."
+        )
+
+        let sidebarVersusComposer = [
+            ReturnInputOCRCandidate(
+                id: 40,
+                source: .focusedInput,
+                recognizedText: "群公告\n历史会话\n侧栏搜索",
+                submittedText: "群公告\n历史会话\n侧栏搜索",
+                recognizedLineCount: 3,
+                averageConfidence: 0.995
+            ),
+            ReturnInputOCRCandidate(
+                id: 41,
+                source: .inferredComposerRegion,
+                recognizedText: weChatSubmission,
+                submittedText: weChatSubmission,
+                recognizedLineCount: 1,
+                averageConfidence: 0.90
+            )
+        ]
+        try require(
+            ReturnInputCaptureContract.selectOCRCandidate(
+                sidebarVersusComposer,
+                referenceText: weChatSubmission
+            )?.id == 41,
+            "High-confidence WeChat sidebar OCR beat the lower-confidence submitted text."
+        )
+
+        let codexSubmission = "AGENTONE_CODEX_RETURN_HARNESS"
+        let codexRecovery = ReturnInputCaptureContract.regionsFromFullScreenOCR(
+            lines: [
+                NormalizedOCRLine(
+                    text: codexSubmission,
+                    x: 0.46, y: 0.23, width: 0.34, height: 0.035, confidence: 0.95
+                ),
+                NormalizedOCRLine(
+                    text: "model: gpt-5 tokens: 188K",
+                    x: 0.35, y: 0.02, width: 0.30, height: 0.025, confidence: 0.99
+                )
+            ],
+            focusedFrame: CGRect(x: 210, y: 630, width: 940, height: 150),
+            caretFrame: nil,
+            windowFrame: window,
+            displayFrame: window,
+            referenceText: codexSubmission,
+            interactionPoint: CGPoint(x: 720, y: 700),
+            profile: .codex
+        )
+        try require(
+            codexRecovery.count == 1
+                && codexRecovery.allSatisfy { $0.y > 0.65 && $0.y + $0.height < 0.86 },
+            "Codex Return recovery included the model/token/footer status strip."
+        )
+
+        let feishuSubmission = "AGENTONE_FEISHU_RETURN_HARNESS"
+        let feishuSidebar = CGRect(x: 18, y: 620, width: 246, height: 68)
+        let feishuMiddleEditor = CGRect(x: 340, y: 320, width: 650, height: 92)
+        let feishuBottomComposer = CGRect(x: 330, y: 654, width: 760, height: 108)
+        try require(
+            !ReturnInputComposerProfile.feishu.acceptsTrustedInputGeometry(feishuSidebar, in: window)
+                && ReturnInputComposerProfile.feishu.acceptsTrustedInputGeometry(feishuMiddleEditor, in: window)
+                && ReturnInputComposerProfile.feishu.acceptsTrustedInputGeometry(feishuBottomComposer, in: window),
+            "Feishu sidebar/editor/composer geometry classification regressed."
+        )
+        let feishuMiddleResult = ReturnInputCaptureContract.regionsFromFullScreenOCR(
+            lines: [
+                NormalizedOCRLine(
+                    text: feishuSubmission,
+                    x: 0.46, y: 0.24, width: 0.34, height: 0.035, confidence: 0.99
+                )
+            ],
+            focusedFrame: feishuMiddleEditor,
+            caretFrame: nil,
+            windowFrame: window,
+            displayFrame: window,
+            referenceText: feishuSubmission,
+            profile: .feishu
+        )
+        try require(
+            feishuMiddleResult.isEmpty,
+            "A Feishu middle-page editor Return was stolen by the bottom chat recovery band."
+        )
+
         return HarnessCheck(
             name: "Return input ROI contract",
-            detail: "Full-display OCR now follows the last focus click without AX, rejects duplicate history/sidebar text and click-conflicting AX frames, handles offset-display mirroring, groups wrapped lines into one ROI, uses the caret for large editors, and keeps model payloads ROI-only."
+            detail: "Full-display OCR uses one top-left coordinate space; production-profile checks reject WeChat/Feishu sidebars, recover only the immediately sent message after a cleared composer, exclude Codex model/token/footer status, preserve Feishu middle editors, handle offset displays and keep model payloads ROI-only."
         )
     }
 

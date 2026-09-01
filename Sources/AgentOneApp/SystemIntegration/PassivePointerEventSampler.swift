@@ -29,9 +29,9 @@ final class PassivePointerEventSampler: @unchecked Sendable {
     func sample(_ event: NSEvent) -> PassivePointerSignal? {
         switch event.type {
         case .leftMouseDown:
-            return clickSignal(kind: .primaryClick)
+            return clickSignal(event, kind: .primaryClick)
         case .rightMouseDown:
-            return clickSignal(kind: .secondaryClick)
+            return clickSignal(event, kind: .secondaryClick)
         case .scrollWheel:
             return scrollSignal(event)
         default:
@@ -39,16 +39,32 @@ final class PassivePointerEventSampler: @unchecked Sendable {
         }
     }
 
-    private func clickSignal(kind: PassivePointerSignal.Kind) -> PassivePointerSignal {
-        let point = NSEvent.mouseLocation
+    private func clickSignal(
+        _ event: NSEvent,
+        kind: PassivePointerSignal.Kind
+    ) -> PassivePointerSignal {
+        // CGEvent locations share the top-left global Quartz space used by
+        // ScreenCaptureKit and Accessibility frames. NSEvent.mouseLocation is
+        // bottom-left AppKit space; storing it unchanged was the reason a click
+        // in a bottom composer could anchor a crop near the top of the window.
+        let point = event.cgEvent?.location ?? Self.quartzPoint(fromAppKit: NSEvent.mouseLocation)
         return PassivePointerSignal(
             timestamp: Date(),
             kind: kind,
             magnitude: 1,
             metadata: [
                 "screenX": String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), point.x),
-                "screenY": String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), point.y)
+                "screenY": String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), point.y),
+                "coordinateSpace": "quartz-top-left"
             ]
+        )
+    }
+
+    private static func quartzPoint(fromAppKit point: CGPoint) -> CGPoint {
+        let mainDisplayBounds = CGDisplayBounds(CGMainDisplayID())
+        return CGPoint(
+            x: point.x,
+            y: mainDisplayBounds.minY + mainDisplayBounds.maxY - point.y
         )
     }
 

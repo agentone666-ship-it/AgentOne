@@ -58,12 +58,16 @@ public actor ContextSemanticAnalyzer {
         apiKey: String,
         baseURL: URL,
         model: String,
-        provider: String
+        provider: String,
+        route: ModelInferenceRoute = .cloud,
+        requiresAPIKey: Bool = true
     ) async throws -> (ContextSemanticAnalysis, ModelInferenceResult) {
         let client = OpenAICompatibleModelClient(configuration: .init(
             baseURL: baseURL,
             model: model,
-            providerName: provider
+            providerName: provider,
+            route: route,
+            requiresAPIKey: requiresAPIKey
         ))
         let request = ModelInferenceRequest(
             purpose: "context_enrichment",
@@ -73,7 +77,7 @@ public actor ContextSemanticAnalyzer {
                 personalMemory: personalMemory
             ),
             context: context,
-            allowsCloudProcessing: true
+            allowsCloudProcessing: route == .cloud
         )
         let inference = try await client.infer(request, apiKey: apiKey)
         guard let analysis = Self.decode(inference.text) else {
@@ -194,12 +198,16 @@ public actor DailyContextDigestAnalyzer {
         apiKey: String,
         baseURL: URL,
         model: String,
-        provider: String
+        provider: String,
+        route: ModelInferenceRoute = .cloud,
+        requiresAPIKey: Bool = true
     ) async throws -> (DailyContextDigestAnalysis, ModelInferenceResult) {
         let client = OpenAICompatibleModelClient(configuration: .init(
             baseURL: baseURL,
             model: model,
-            providerName: provider
+            providerName: provider,
+            route: route,
+            requiresAPIKey: requiresAPIKey
         ))
         let inference = try await client.infer(
             ModelInferenceRequest(
@@ -211,7 +219,7 @@ public actor DailyContextDigestAnalyzer {
                     personalMemories: personalMemories
                 ),
                 context: nil,
-                allowsCloudProcessing: true
+                allowsCloudProcessing: route == .cloud
             ),
             apiKey: apiKey
         )

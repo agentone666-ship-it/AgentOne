@@ -58,6 +58,10 @@ final class PassiveKeyboardEventTap: @unchecked Sendable {
         reducer = KeyboardSignalReducer()
     }
 
+    func resetTypingSession() {
+        reducer.resetTypingSession()
+    }
+
     private static let eventTapCallback: CGEventTapCallBack = { _, type, event, userInfo in
         guard let userInfo else { return Unmanaged.passUnretained(event) }
         let monitor = Unmanaged<PassiveKeyboardEventTap>.fromOpaque(userInfo).takeUnretainedValue()

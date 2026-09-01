@@ -89,7 +89,7 @@ struct AgentOneOnboardingView: View {
     @ObservedObject private var modelSettings = AgentModelSettings.shared
     @State private var page = 0
     @State private var homePath = AgentHomePreferences.rootURL.path
-    @State private var mode: AgentInferenceMode = .cloud
+    @State private var mode: AgentInferenceMode = .local
     @State private var apiKey = ""
     @State private var apiKeyBaseURL = AgentModelSettings.defaultAPIKeyBaseURL
     @State private var apiKeyModel = AgentModelSettings.defaultAPIKeyModel

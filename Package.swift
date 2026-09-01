@@ -67,6 +67,10 @@ let package = Package(
         .testTarget(
             name: "AgentOneCoreTests",
             dependencies: ["AgentOneCore"]
+        ),
+        .testTarget(
+            name: "AgentOneAppCaptureTests",
+            dependencies: ["AgentOneApp", "AgentOneCore"]
         )
     ]
 )

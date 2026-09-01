@@ -31,7 +31,7 @@ export async function handleLine(
         type: "ready",
         payload: {
           runtime: "pi-agent-core",
-          runtimeMode: modelConfiguration.route === "cloud" ? "cloud" : "offline-faux",
+          runtimeMode: modelConfiguration.route === "offline" ? "offline-faux" : modelConfiguration.route,
           provider: modelConfiguration.provider,
           model: modelConfiguration.model,
           piVersion: piAgentCoreVersion,

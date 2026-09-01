@@ -28,7 +28,7 @@ public enum FocusedTextSubmissionExtractor {
         let compactComposer = !terminal
             && text.utf16.count <= 1_500
             && lines.count <= 8
-            && isEditableRole(focusedRole)
+            && isDirectTextInputRole(focusedRole)
 
         if compactComposer {
             return plausibleSubmission(text, limit: limit)
@@ -168,11 +168,17 @@ public enum FocusedTextSubmissionExtractor {
 
     private static func isEditableRole(_ role: String?) -> Bool {
         guard let role = role?.lowercased() else { return false }
+        return isDirectTextInputRole(role)
+            || role.contains("textarea")
+            || role.contains("webarea")
+            || role.contains("document")
+    }
+
+    private static func isDirectTextInputRole(_ role: String?) -> Bool {
+        guard let role = role?.lowercased() else { return false }
         return role.contains("textfield")
             || role.contains("textarea")
             || role.contains("combobox")
-            || role.contains("webarea")
-            || role.contains("document")
     }
 
     private static func isTerminalLike(

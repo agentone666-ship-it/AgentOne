@@ -53,6 +53,9 @@ final class AgentModelSettings: ObservableObject {
     @Published private(set) var hasAPIKey: Bool
     @Published private(set) var isConnectingKimi = false
     @Published private(set) var credentialError: String?
+    @Published private(set) var localModelStatus: LocalModelStatus = .checking
+    @Published private(set) var isTestingLocalModel = false
+    @Published private(set) var localModelTestMessage: String?
 
     /// Compatibility while older views migrate from API-Key-only wording.
     var hasCredential: Bool { hasAPIKey }
@@ -68,6 +71,8 @@ final class AgentModelSettings: ObservableObject {
 
     nonisolated static let defaultAPIKeyBaseURL = "http://algoagent.zhuaninc.com/algo"
     nonisolated static let defaultAPIKeyModel = "glm-5.2"
+    nonisolated static let localBaseURL = "http://127.0.0.1:11434/v1"
+    nonisolated static let localModel = "llama3.2:3b"
 
     private let defaults: UserDefaults
     private let credentialStore: ModelCredentialStore
@@ -84,7 +89,7 @@ final class AgentModelSettings: ObservableObject {
             deviceHeaders: .agentOne(defaults: defaults)
         )
         self.route = defaults.string(forKey: Keys.route)
-            .flatMap(ModelInferenceRoute.init(rawValue:)) ?? .cloud
+            .flatMap(ModelInferenceRoute.init(rawValue:)) ?? .local
         self.auditsCloudInvocations = defaults.object(forKey: Keys.auditCloudInvocations) as? Bool ?? true
         let savedAuthentication = defaults.string(forKey: Keys.preferredCloudAuthentication)
         self.preferredCloudAuthentication = savedAuthentication == CloudAuthenticationPreference.apiKey.rawValue
@@ -94,6 +99,88 @@ final class AgentModelSettings: ObservableObject {
         self.apiKeyModel = defaults.string(forKey: Keys.apiKeyModel) ?? Self.defaultAPIKeyModel
         self.hasKimiConnection = credentialStore.containsKimiCredential()
         self.hasAPIKey = credentialStore.containsAPIKey()
+        Task { await refreshLocalModelStatus() }
+    }
+
+    enum LocalModelStatus: Equatable {
+        case checking
+        case serviceUnavailable
+        case modelMissing
+        case ready(sizeBytes: Int64?)
+
+        var isReady: Bool {
+            if case .ready = self { return true }
+            return false
+        }
+    }
+
+    func refreshLocalModelStatus() async {
+        localModelStatus = .checking
+        guard let url = URL(string: "http://127.0.0.1:11434/api/tags") else {
+            localModelStatus = .serviceUnavailable
+            return
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 2
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode),
+                  let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let models = root["models"] as? [[String: Any]] else {
+                localModelStatus = .serviceUnavailable
+                return
+            }
+            if let model = models.first(where: {
+                (($0["name"] as? String) ?? ($0["model"] as? String)) == Self.localModel
+            }) {
+                let number = model["size"] as? NSNumber
+                localModelStatus = .ready(sizeBytes: number?.int64Value)
+            } else {
+                localModelStatus = .modelMissing
+            }
+        } catch {
+            localModelStatus = .serviceUnavailable
+        }
+    }
+
+    @discardableResult
+    func testLocalModel() async -> Bool {
+        guard !isTestingLocalModel else { return false }
+        isTestingLocalModel = true
+        localModelTestMessage = "正在让本地模型说一句话…"
+        defer { isTestingLocalModel = false }
+        let decision = LocalInferenceResourcePolicy.evaluate(
+            secondsSinceLastInteraction: .greatestFiniteMagnitude,
+            minimumIdleSeconds: 0,
+            userInitiated: true
+        )
+        guard decision.canRun else {
+            localModelTestMessage = "电脑现在比较忙（\(decision.reason?.userMessage ?? "资源不足")），先不启动本地模型。"
+            return false
+        }
+        do {
+            let result = try await OpenAICompatibleModelClient(configuration: .defaultLocal).infer(
+                ModelInferenceRequest(
+                    purpose: "local_model_connection_test",
+                    systemPrompt: "你是 AgentOne 的本地模型。",
+                    userPrompt: "只回复：本地模型已醒来",
+                    context: nil,
+                    allowsCloudProcessing: false
+                ),
+                apiKey: ""
+            )
+            localModelStatus = .ready(sizeBytes: {
+                if case .ready(let size) = localModelStatus { return size }
+                return nil
+            }())
+            localModelTestMessage = "已真实调用 \(result.provider) / \(result.model)：\(String(result.text.prefix(80)))"
+            return true
+        } catch {
+            localModelTestMessage = error.localizedDescription
+            await refreshLocalModelStatus()
+            return false
+        }
     }
 
     @discardableResult

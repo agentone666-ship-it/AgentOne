@@ -12,6 +12,19 @@ final class AgentOneRuntime: ObservableObject {
         let capturedAt: Date
     }
 
+    private struct DeferredContextAnalysis: Sendable {
+        let event: ActivityEvent
+        let analysisKey: String
+    }
+
+    private enum ReturnInputAnchorSource: String, Sendable {
+        case typingBurst = "typing_burst"
+        case retainedSession = "retained_session"
+        case recentClick = "recent_click"
+        case axFocus = "ax_focus"
+        case none
+    }
+
     let shellModel = AgentOneShellViewModel()
     let companion = FloatingCompanionController()
     let systemMonitor = SystemSignalMonitor()
@@ -27,6 +40,8 @@ final class AgentOneRuntime: ObservableObject {
     private var eventPreparationTask: Task<Void, Never>?
     private var contextAnalysisTask: Task<Void, Never>?
     private var contextAnalysisID: UUID?
+    private var activeContextAnalysis: DeferredContextAnalysis?
+    private var deferredContextAnalysis: DeferredContextAnalysis?
     private var dailyDigestTask: Task<Void, Never>?
     private var dailyDigestTaskID: UUID?
     private var proactiveTimer: Timer?
@@ -43,9 +58,15 @@ final class AgentOneRuntime: ObservableObject {
     /// is the only reliable focus anchor available at Return time.
     private var lastPrimaryClickHint: InputFocusHint?
     private var cachedDraftInputHint: InputFocusHint?
+    private var cachedDraftInputAnchorSource: ReturnInputAnchorSource?
+    private var retainedInputSessionAnchor: ReturnInputSessionAnchor?
+    private let preReturnInputEvidenceBuffer = PreReturnInputEvidenceBuffer()
     private var lastExternalChatContext: ActiveApplicationContext?
     private var isIgnoringAgentOneContext = false
     private var modelAuditStore = ModelInvocationAuditStore(rootURL: AgentHomePreferences.rootURL)
+    private var returnCaptureDiagnosticStore = ReturnCaptureDiagnosticStore(
+        rootURL: AgentHomePreferences.rootURL
+    )
     private let contextSemanticAnalyzer = ContextSemanticAnalyzer()
     private let dailyContextDigestAnalyzer = DailyContextDigestAnalyzer()
     private let proactivePolicy = ProactiveCompanionPolicy()
@@ -99,6 +120,9 @@ final class AgentOneRuntime: ObservableObject {
         cachedDraftContext = nil
         lastPrimaryClickHint = nil
         cachedDraftInputHint = nil
+        cachedDraftInputAnchorSource = nil
+        retainedInputSessionAnchor = nil
+        preReturnInputEvidenceBuffer.clear()
         lastExternalChatContext = nil
         isIgnoringAgentOneContext = false
         hasStarted = true
@@ -106,7 +130,7 @@ final class AgentOneRuntime: ObservableObject {
         companion.life.currentTaskName = shellModel.currentIntent.title
 
         systemMonitor.onSignal = { [weak self] signal in
-            self?.record(signal)
+            self?.record(signal, immediateInputContext: Self.immediateInputContext(for: signal))
         }
         systemMonitor.start()
         proactiveTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
@@ -141,6 +165,8 @@ final class AgentOneRuntime: ObservableObject {
         contextAnalysisTask?.cancel()
         contextAnalysisTask = nil
         contextAnalysisID = nil
+        activeContextAnalysis = nil
+        deferredContextAnalysis = nil
         dailyDigestTask?.cancel()
         dailyDigestTask = nil
         dailyDigestTaskID = nil
@@ -149,8 +175,9 @@ final class AgentOneRuntime: ObservableObject {
         leisureContextKey = nil
         leisureContextStartedAt = nil
         systemMonitor.stop()
+        preReturnInputEvidenceBuffer.clear()
         piSidecar.stopImmediately()
-        companion.hide()
+        companion.stop()
         hasStarted = false
         if let engine {
             let priorRecording = recordingTask
@@ -329,9 +356,13 @@ final class AgentOneRuntime: ObservableObject {
                 case let modelError as ModelInferenceError:
                     message = "模型连接没有完成：\(modelError.localizedDescription)"
                 default:
-                    message = route.usesCloud
-                        ? "模型这次没有接通。我没有泄露你的凭证或 Context；可以到模型设置里检查连接。"
-                        : "我现在还没有模型口粮，但我在。你可以先把想法放在这里。"
+                    if route.usesCloud {
+                        message = "云端模型这次没有接通。我没有泄露你的凭证或 Context；可以到模型设置里检查连接。"
+                    } else if route.usesModel {
+                        message = "本地模型这次没有醒来。可以到模型设置里检查 Ollama 和本地模型状态。"
+                    } else {
+                        message = "我现在还没有模型口粮，但我在。你可以先把想法放在这里。"
+                    }
                 }
                 self.companion.chat.receiveError(message, for: request.id)
                 self.companion.life.transition(to: .curious)
@@ -397,7 +428,9 @@ final class AgentOneRuntime: ObservableObject {
         return try await OpenAICompatibleModelClient(configuration: .init(
             baseURL: configuration.baseURL,
             model: configuration.model,
-            providerName: "openai-compatible-completions"
+            providerName: configuration.provider,
+            route: configuration.inferenceRoute,
+            requiresAPIKey: configuration.requiresAPIKey
         )).infer(
             ModelInferenceRequest(
                 purpose: "user_chat_compatibility_fallback",
@@ -409,7 +442,7 @@ final class AgentOneRuntime: ObservableObject {
                 """,
                 userPrompt: userPrompt,
                 context: context,
-                allowsCloudProcessing: true
+                allowsCloudProcessing: configuration.inferenceRoute == .cloud
             ),
             apiKey: configuration.apiKey
         )
@@ -481,7 +514,7 @@ final class AgentOneRuntime: ObservableObject {
         fallback: String? = nil,
         error: Error?
     ) async {
-        guard route.usesCloud, AgentModelSettings.shared.auditsCloudInvocations else { return }
+        guard route.usesModel, AgentModelSettings.shared.auditsCloudInvocations else { return }
         let usage = result.map {
             ModelInvocationAudit.Usage(
                 inputTokens: $0.usage.inputTokens,
@@ -495,7 +528,7 @@ final class AgentOneRuntime: ObservableObject {
         let audit = ModelInvocationAudit(
             timestamp: Date(),
             purpose: "user_chat",
-            route: .cloud,
+            route: route.inferenceRoute,
             provider: result?.model?.provider ?? compatibleResult?.provider ?? route.provider,
             model: result?.model?.model ?? compatibleResult?.model ?? route.model,
             sentContextFields: Self.sentContextFields(in: usedContext),
@@ -546,31 +579,94 @@ final class AgentOneRuntime: ObservableObject {
         }
     }
 
-    private func record(_ signal: SystemActivitySignal) {
+    private func record(
+        _ signal: SystemActivitySignal,
+        immediateInputContext: ActiveApplicationContext? = nil
+    ) {
+        if signal.kind == .applicationChanged {
+            cachedDraftContext = nil
+            cachedDraftInputHint = nil
+            cachedDraftInputAnchorSource = nil
+            retainedInputSessionAnchor = nil
+            lastPrimaryClickHint = nil
+            preReturnInputEvidenceBuffer.clear()
+        }
+
         if signal.kind == .primaryClick,
            let point = Self.screenPoint(from: signal.metadata) {
-            // Capture synchronously before the preparation queue can be
-            // delayed by a burst of scroll/typing signals.
+            // A click starts a new focus hypothesis. Invalidate the previous
+            // composer immediately so a click on a WeChat/Feishu conversation
+            // row cannot inherit the last input box for the next Return.
+            cachedDraftContext = nil
+            cachedDraftInputHint = nil
+            cachedDraftInputAnchorSource = nil
+            retainedInputSessionAnchor = nil
+            preReturnInputEvidenceBuffer.clear()
             lastPrimaryClickHint = InputFocusHint(
                 point: CGPoint(x: point.x, y: point.y),
                 bundleIdentifier: signal.bundleIdentifier,
                 capturedAt: signal.timestamp
             )
+            // Prime the in-memory frame stream from the click that activated
+            // the composer. This covers very short submissions whose first key
+            // and Return arrive before a new ScreenCaptureKit stream could
+            // otherwise deliver its first frame.
+            if let active = ActiveContextReader.read(scope: .focusedElement),
+               !active.isSecureInput,
+               active.bundleIdentifier?.lowercased() != Self.ownBundleIdentifier,
+               Self.clickSupportsInputContext(
+                    CGPoint(x: point.x, y: point.y),
+                    active: active
+               ) {
+                let profile = ReturnInputComposerProfile.resolve(
+                    bundleIdentifier: active.bundleIdentifier,
+                    applicationName: active.applicationName
+                )
+                preReturnInputEvidenceBuffer.update(
+                    active: active,
+                    interactionPoint: CGPoint(x: point.x, y: point.y),
+                    profile: profile,
+                    signalTimestamp: signal.timestamp,
+                    startsNewSubmission: true
+                )
+            }
+        }
+
+        // Preserve the last pre-Return AX snapshot synchronously. The diary
+        // preparation task is intentionally cancelled when Return arrives, so
+        // caching this only inside that task loses short/fast submissions and
+        // leaves OCR with a stale one- or two-character draft.
+        if signal.kind == .typingStarted || signal.kind == .typingProgress {
+            updateDraftCache(from: immediateInputContext, for: signal)
         }
 
         if signal.kind != .idle {
-            cancelDailyDigestForLiveActivity()
+            pauseBackgroundLocalInferenceForLiveActivity()
         }
 
         // Return is latency-sensitive: the target app may clear its composer
-        // as soon as it receives the key event. Do not queue it behind earlier
-        // scroll/typing preparation; take the full-screen locator screenshot
-        // immediately, then let diary/model persistence retain normal order.
+        // as soon as it receives the key event. Freeze the newest frame whose
+        // capture timestamp is no later than Return *before* creating any async
+        // task. Reading `latest` later races the target app and can silently
+        // replace the draft with an already-cleared, post-submit frame.
         if signal.kind == .returnPressed {
+            let frozenPreReturnEvidence = preReturnInputEvidenceBuffer.evidence(
+                at: signal.timestamp,
+                bundleIdentifier: immediateInputContext?.bundleIdentifier
+                    ?? cachedDraftContext?.bundleIdentifier
+                    ?? signal.bundleIdentifier,
+                windowIdentifier: immediateInputContext?.windowIdentifier
+                    ?? cachedDraftContext?.windowIdentifier
+            )
+            preReturnInputEvidenceBuffer.finishSubmission()
             eventPreparationTask?.cancel()
             eventPreparationTask = Task { [weak self] in
                 guard let self, self.hasStarted else { return }
-                let event = await self.prepareReturnEvent(from: signal)
+                let event = await self.prepareReturnEvent(
+                    from: signal,
+                    immediateInputContext: immediateInputContext,
+                    frozenPreReturnEvidence: frozenPreReturnEvidence
+                )
                 guard !Task.isCancelled else { return }
                 self.recordPrepared(event, from: signal)
             }
@@ -581,7 +677,10 @@ final class AgentOneRuntime: ObservableObject {
         eventPreparationTask = Task { [weak self] in
             await priorPreparation?.value
             guard let self, !Task.isCancelled, self.hasStarted else { return }
-            let event = await self.prepareActivityEvent(from: signal)
+            let event = await self.prepareActivityEvent(
+                from: signal,
+                immediateInputContext: immediateInputContext
+            )
             guard !Task.isCancelled else { return }
             self.recordPrepared(event, from: signal)
         }
@@ -655,7 +754,10 @@ final class AgentOneRuntime: ObservableObject {
         }
     }
 
-    private func prepareActivityEvent(from signal: SystemActivitySignal) async -> ActivityEvent {
+    private func prepareActivityEvent(
+        from signal: SystemActivitySignal,
+        immediateInputContext: ActiveApplicationContext? = nil
+    ) async -> ActivityEvent {
         switch signal.kind {
         case .primaryClick:
             let before = ActiveContextReader.read()
@@ -688,24 +790,7 @@ final class AgentOneRuntime: ObservableObject {
             // Typing must remain invisible to the foreground app. Sampling only
             // the focused control avoids traversing hundreds of browser/WeChat
             // accessibility nodes while the user is composing text.
-            let active = ActiveContextReader.read(scope: .focusedElement)
-            if let hint = lastPrimaryClickHint,
-               signal.timestamp.timeIntervalSince(hint.capturedAt) <= 45,
-               (hint.bundleIdentifier == nil
-                    || active?.bundleIdentifier == nil
-                    || hint.bundleIdentifier == active?.bundleIdentifier) {
-                cachedDraftInputHint = hint
-            }
-            if let active,
-               !active.isSecureInput,
-               active.bundleIdentifier?.lowercased() != Self.ownBundleIdentifier,
-               !SensitiveContextPolicy.isProtectedSurface(
-                    bundleIdentifier: active.bundleIdentifier,
-                    windowTitle: active.windowTitle,
-                    focusedRole: active.focusedRole
-               ) {
-                cachedDraftContext = active
-            }
+            let active = immediateInputContext ?? ActiveContextReader.read(scope: .focusedElement)
             return makeActivityEvent(from: signal, activeOverride: active)
 
         default:
@@ -713,12 +798,16 @@ final class AgentOneRuntime: ObservableObject {
         }
     }
 
-    private func prepareReturnEvent(from signal: SystemActivitySignal) async -> ActivityEvent {
+    private func prepareReturnEvent(
+        from signal: SystemActivitySignal,
+        immediateInputContext: ActiveApplicationContext? = nil,
+        frozenPreReturnEvidence: PreReturnInputEvidence? = nil
+    ) async -> ActivityEvent {
         // Capture the focused control first without a full AX-tree walk. A full
         // traversal here can stall the foreground app long enough for macOS key
         // repeat events to accumulate, and it also delays the screenshot until
         // after the composer has been cleared.
-        let foreground = ActiveContextReader.read(scope: .focusedElement)
+        let foreground = immediateInputContext ?? ActiveContextReader.read(scope: .focusedElement)
         let draft = cachedDraftContext.flatMap { cached -> ActiveApplicationContext? in
             guard signal.timestamp.timeIntervalSince(cached.capturedAt) <= 5 * 60 else { return nil }
             let signalBundle = foreground?.bundleIdentifier ?? signal.bundleIdentifier
@@ -726,17 +815,93 @@ final class AgentOneRuntime: ObservableObject {
             return cached
         }
         cachedDraftContext = nil
-        let interactionPoint = cachedDraftInputHint?.point
-            ?? lastPrimaryClickHint
-                .flatMap { hint in
-                    guard signal.timestamp.timeIntervalSince(hint.capturedAt) <= 45 else { return nil }
-                    guard hint.bundleIdentifier == nil
-                        || foreground?.bundleIdentifier == nil
-                        || hint.bundleIdentifier == foreground?.bundleIdentifier else { return nil }
-                    return hint.point
-                }
-        cachedDraftInputHint = nil
         let active = Self.richerActiveContext(draft, foreground) ?? foreground ?? draft
+        let trustedForeground = foreground.flatMap { Self.isTrustedInputContext($0) ? $0 : nil }
+        let captureContext = Self.richerActiveContext(draft, trustedForeground)
+            ?? draft
+            ?? trustedForeground
+        let composerProfile = ReturnInputComposerProfile.resolve(
+            bundleIdentifier: captureContext?.bundleIdentifier ?? active?.bundleIdentifier ?? signal.bundleIdentifier,
+            applicationName: captureContext?.applicationName ?? active?.applicationName ?? signal.applicationName
+        )
+        let currentBundleIdentifier = captureContext?.bundleIdentifier
+            ?? active?.bundleIdentifier
+            ?? signal.bundleIdentifier
+        let currentWindowIdentifier = captureContext?.windowIdentifier
+            ?? active?.windowIdentifier
+        let currentWindowFrame = captureContext?.windowFrame
+            ?? active?.windowFrame
+        let currentFocusedFrame = captureContext?.focusedFrame
+            ?? active?.focusedFrame
+        let currentCaretFrame = draft?.focusedCaretFrame
+            ?? trustedForeground?.focusedCaretFrame
+            ?? captureContext?.focusedCaretFrame
+            ?? active?.focusedCaretFrame
+
+        // The current typing burst is strongest. If it did not start with a
+        // fresh click, reuse the composer location previously validated in the
+        // same app/window. This is what keeps the second and third consecutive
+        // WeChat, Codex and Feishu submissions anchored without forcing another
+        // click into the input box.
+        var anchorSource = cachedDraftInputAnchorSource ?? .none
+        var interactionPoint: CGPoint? = cachedDraftInputHint.flatMap { hint -> CGPoint? in
+            guard signal.timestamp.timeIntervalSince(hint.capturedAt) <= 30 else { return nil }
+            guard hint.bundleIdentifier == nil
+                || currentBundleIdentifier == nil
+                || hint.bundleIdentifier == currentBundleIdentifier else { return nil }
+            return hint.point
+        }
+        if interactionPoint == nil,
+           let retainedInputSessionAnchor,
+           let currentWindowFrame {
+            interactionPoint = retainedInputSessionAnchor.resolvedPoint(
+                bundleIdentifier: currentBundleIdentifier,
+                windowIdentifier: currentWindowIdentifier,
+                windowFrame: currentWindowFrame,
+                focusedFrame: currentFocusedFrame,
+                caretFrame: currentCaretFrame,
+                profile: composerProfile,
+                at: signal.timestamp
+            )
+            if interactionPoint != nil {
+                anchorSource = .retainedSession
+            }
+        }
+        if interactionPoint == nil,
+           let recentClick = lastPrimaryClickHint,
+           signal.timestamp.timeIntervalSince(recentClick.capturedAt) <= 15,
+           recentClick.bundleIdentifier == nil
+                || currentBundleIdentifier == nil
+                || recentClick.bundleIdentifier == currentBundleIdentifier,
+           let active,
+           Self.clickSupportsInputContext(recentClick.point, active: active) {
+            interactionPoint = recentClick.point
+            anchorSource = .recentClick
+            if let currentWindowFrame {
+                retainedInputSessionAnchor = ReturnInputSessionAnchor(
+                    point: recentClick.point,
+                    bundleIdentifier: currentBundleIdentifier,
+                    windowIdentifier: currentWindowIdentifier,
+                    windowFrame: currentWindowFrame,
+                    capturedAt: signal.timestamp
+                )
+            }
+            lastPrimaryClickHint = nil
+        }
+        if interactionPoint == nil,
+           anchorSource == .none,
+           captureContext.map(Self.isTrustedInputContext) == true {
+            anchorSource = .axFocus
+        }
+        cachedDraftInputHint = nil
+        cachedDraftInputAnchorSource = nil
+        let diagnosticBundleIdentifier = captureContext?.bundleIdentifier
+            ?? active?.bundleIdentifier
+            ?? signal.bundleIdentifier
+        let diagnosticFocusedRole = captureContext?.focusedRole ?? active?.focusedRole
+        let diagnosticFocusedFrame = captureContext?.focusedFrame
+        let diagnosticCaretFrame = draft?.focusedCaretFrame
+            ?? trustedForeground?.focusedCaretFrame
         let surfaceIsSensitive = active?.isSecureInput == true
             || SensitiveContextPolicy.isProtectedSurface(
                 bundleIdentifier: active?.bundleIdentifier ?? signal.bundleIdentifier,
@@ -746,23 +911,60 @@ final class AgentOneRuntime: ObservableObject {
 
         guard !surfaceIsSensitive,
               active?.bundleIdentifier?.lowercased() != Self.ownBundleIdentifier else {
+            try? await returnCaptureDiagnosticStore.append(.init(
+                timestamp: signal.timestamp,
+                profile: composerProfile,
+                bundleIdentifier: diagnosticBundleIdentifier,
+                focusedRole: diagnosticFocusedRole,
+                focusedFrame: diagnosticFocusedFrame,
+                caretFrame: diagnosticCaretFrame,
+                interactionPoint: interactionPoint,
+                anchorSource: anchorSource.rawValue,
+                metadata: nil,
+                submittedTextPresent: false,
+                failureReason: surfaceIsSensitive ? "sensitive_surface" : "agentone_surface"
+            ))
             return makeActivityEvent(from: signal, activeOverride: active, forceSensitive: surfaceIsSensitive)
         }
 
-        let sampledSubmittedText = Self.focusedSubmittedText(from: draft)
-            ?? Self.focusedSubmittedText(from: foreground)
+        let sampledSubmittedText = Self.focusedSubmittedText(from: captureContext)
         var submittedText = sampledSubmittedText
         var screenText: String?
         var screenshotPath: String?
+        var evidencePhase = ReturnSubmissionEvidencePhase.postSubmission
         do {
-            let capture = try await WindowContextCapture.captureFrontmostWindow(
-                focusedFrame: draft?.focusedFrame ?? foreground?.focusedFrame ?? active?.focusedFrame,
-                caretFrame: draft?.focusedCaretFrame
-                    ?? foreground?.focusedCaretFrame
-                    ?? active?.focusedCaretFrame,
-                referenceText: sampledSubmittedText,
-                interactionPoint: interactionPoint
-            )
+            let capture: CapturedKeyMoment
+            if let bufferedEvidence = frozenPreReturnEvidence {
+                evidencePhase = .preSubmission
+                let bufferedCapture = try WindowContextCapture.captureBufferedInputRegion(
+                    bufferedEvidence.image,
+                    windowFrame: bufferedEvidence.windowFrame,
+                    region: bufferedEvidence.inputRegion,
+                    referenceText: sampledSubmittedText,
+                    profile: bufferedEvidence.profile
+                )
+                guard let bufferedCandidate = Self.meaningfulSubmittedText(
+                    bufferedCapture.submittedTextCandidate
+                        ?? bufferedCapture.recognizedText,
+                    active: active
+                ),
+                ReturnSubmissionEvidenceSelector.supportsPreSubmissionEvidence(
+                    evidenceText: bufferedCandidate,
+                    referenceText: sampledSubmittedText
+                ) else {
+                    throw WindowContextCaptureError.noInputRegion(bufferedCapture.diagnosticMetadata)
+                }
+                capture = bufferedCapture
+            } else {
+                capture = try await WindowContextCapture.captureFrontmostWindow(
+                    focusedFrame: captureContext?.focusedFrame,
+                    caretFrame: draft?.focusedCaretFrame
+                        ?? trustedForeground?.focusedCaretFrame,
+                    referenceText: sampledSubmittedText,
+                    interactionPoint: interactionPoint,
+                    profile: composerProfile
+                )
+            }
             let inputRegionText = capture.recognizedText
             let screenSubmittedText = Self.meaningfulSubmittedText(
                 capture.submittedTextCandidate,
@@ -783,6 +985,20 @@ final class AgentOneRuntime: ObservableObject {
                 active?.selectedText
             ) {
                 AgentOneRuntimeHealthStore.shared.markScreenshotDiscardedSensitive(at: signal.timestamp)
+                try? await returnCaptureDiagnosticStore.append(.init(
+                    timestamp: signal.timestamp,
+                    profile: composerProfile,
+                    bundleIdentifier: diagnosticBundleIdentifier,
+                    focusedRole: diagnosticFocusedRole,
+                    focusedFrame: diagnosticFocusedFrame,
+                    caretFrame: diagnosticCaretFrame,
+                    interactionPoint: interactionPoint,
+                    anchorSource: anchorSource.rawValue,
+                    evidencePhase: evidencePhase.rawValue,
+                    metadata: capture.diagnosticMetadata,
+                    submittedTextPresent: false,
+                    failureReason: "sensitive_content_discarded"
+                ))
                 return makeActivityEvent(
                     from: signal,
                     activeOverride: active,
@@ -807,16 +1023,58 @@ final class AgentOneRuntime: ObservableObject {
                 cropPixelHeight: capture.cropPixelHeight,
                 at: signal.timestamp
             )
-        } catch WindowContextCaptureError.permissionDenied {
+            try? await returnCaptureDiagnosticStore.append(.init(
+                timestamp: signal.timestamp,
+                profile: composerProfile,
+                bundleIdentifier: diagnosticBundleIdentifier,
+                focusedRole: diagnosticFocusedRole,
+                focusedFrame: diagnosticFocusedFrame,
+                caretFrame: diagnosticCaretFrame,
+                interactionPoint: interactionPoint,
+                anchorSource: anchorSource.rawValue,
+                evidencePhase: evidencePhase.rawValue,
+                metadata: capture.diagnosticMetadata,
+                submittedTextPresent: submittedText != nil,
+                failureReason: nil
+            ))
+        } catch let captureError as WindowContextCaptureError {
             AgentOneRuntimeHealthStore.shared.markScreenshotUnavailable(
-                reason: "screen_recording_permission",
+                reason: captureError.diagnosticReason,
                 at: signal.timestamp
             )
+            try? await returnCaptureDiagnosticStore.append(.init(
+                timestamp: signal.timestamp,
+                profile: composerProfile,
+                bundleIdentifier: diagnosticBundleIdentifier,
+                focusedRole: diagnosticFocusedRole,
+                focusedFrame: diagnosticFocusedFrame,
+                caretFrame: diagnosticCaretFrame,
+                interactionPoint: interactionPoint,
+                anchorSource: anchorSource.rawValue,
+                evidencePhase: evidencePhase.rawValue,
+                metadata: captureError.attemptMetadata,
+                submittedTextPresent: submittedText != nil,
+                failureReason: captureError.diagnosticReason
+            ))
         } catch {
             AgentOneRuntimeHealthStore.shared.markScreenshotUnavailable(
                 reason: "capture_failed",
                 at: signal.timestamp
             )
+            try? await returnCaptureDiagnosticStore.append(.init(
+                timestamp: signal.timestamp,
+                profile: composerProfile,
+                bundleIdentifier: diagnosticBundleIdentifier,
+                focusedRole: diagnosticFocusedRole,
+                focusedFrame: diagnosticFocusedFrame,
+                caretFrame: diagnosticCaretFrame,
+                interactionPoint: interactionPoint,
+                anchorSource: anchorSource.rawValue,
+                evidencePhase: evidencePhase.rawValue,
+                metadata: nil,
+                submittedTextPresent: submittedText != nil,
+                failureReason: "capture_failed"
+            ))
         }
 
         return makeActivityEvent(
@@ -900,11 +1158,25 @@ final class AgentOneRuntime: ObservableObject {
 
             do {
                 let route = await self.currentPiModelRoute()
+                if route.inferenceRoute == .local {
+                    let decision = LocalInferenceResourcePolicy.evaluate(
+                        secondsSinceLastInteraction: self.systemMonitor.secondsSinceLastInteraction,
+                        minimumIdleSeconds: 15,
+                        userInitiated: false
+                    )
+                    guard decision.canRun else {
+                        AgentOneRuntimeHealthStore.shared.markModelAnalysisSkipped(
+                            reason: "local_resources_\(decision.reason?.rawValue ?? "unknown")"
+                        )
+                        self.applyNative(plan.nativeFallback, activeIntent: nil)
+                        return
+                    }
+                }
                 let result: PiResultPayload
                 do {
                     result = try await self.runPiWake(plan, environment: route.environment)
-                    if route.usesCloud {
-                        await self.recordCloudInvocation(
+                    if route.usesModel {
+                        await self.recordModelInvocation(
                             plan: plan,
                             attemptedRoute: route,
                             result: result,
@@ -913,11 +1185,11 @@ final class AgentOneRuntime: ObservableObject {
                         )
                     }
                 } catch {
-                    guard route.usesCloud else { throw error }
+                    guard route.usesModel else { throw error }
                     if route.provider == "kimi-coding",
                        let apiKeyCredential = AgentModelSettings.shared.resolveAPIKeyFallback() {
                         let apiKeyRoute = self.piModelRoute(for: apiKeyCredential)
-                        await self.recordCloudInvocation(
+                        await self.recordModelInvocation(
                             plan: plan,
                             attemptedRoute: route,
                             result: nil,
@@ -926,7 +1198,7 @@ final class AgentOneRuntime: ObservableObject {
                         )
                         do {
                             result = try await self.runPiWake(plan, environment: apiKeyRoute.environment)
-                            await self.recordCloudInvocation(
+                            await self.recordModelInvocation(
                                 plan: plan,
                                 attemptedRoute: apiKeyRoute,
                                 result: result,
@@ -934,7 +1206,7 @@ final class AgentOneRuntime: ObservableObject {
                                 error: nil
                             )
                         } catch {
-                            await self.recordCloudInvocation(
+                            await self.recordModelInvocation(
                                 plan: plan,
                                 attemptedRoute: apiKeyRoute,
                                 result: nil,
@@ -947,7 +1219,7 @@ final class AgentOneRuntime: ObservableObject {
                             )
                         }
                     } else {
-                        await self.recordCloudInvocation(
+                        await self.recordModelInvocation(
                             plan: plan,
                             attemptedRoute: route,
                             result: nil,
@@ -987,6 +1259,8 @@ final class AgentOneRuntime: ObservableObject {
 
     private struct PiModelRoute {
         var environment: [String: String]
+        var inferenceRoute: ModelInferenceRoute
+        var usesModel: Bool
         var usesCloud: Bool
         var provider: String
         var model: String
@@ -998,32 +1272,88 @@ final class AgentOneRuntime: ObservableObject {
         var apiKey: String
         var baseURL: URL
         var model: String
+        var provider: String = "openai-compatible-completions"
+        var inferenceRoute: ModelInferenceRoute = .cloud
+        var requiresAPIKey: Bool = true
     }
 
     private func currentPiModelRoute() async -> PiModelRoute {
         let settings = AgentModelSettings.shared
         switch settings.route {
         case .local:
-            return PiModelRoute(
-                environment: ["AGENTONE_MODEL_ROUTE": "offline"],
-                usesCloud: false,
-                provider: "agentone-offline",
-                model: "agentone-policy-v1",
-                apiKeyFallback: nil,
-                prefersCompatibleChat: false
-            )
-        case .cloud, .automatic:
+            return localPiModelRoute()
+        case .automatic:
+            if await Self.isLocalModelReady() {
+                return localPiModelRoute()
+            }
             guard let credential = await settings.resolveCloudCredential() else {
-                return PiModelRoute(
-                    environment: ["AGENTONE_MODEL_ROUTE": "offline"],
-                    usesCloud: false,
-                    provider: "agentone-offline",
-                    model: "agentone-policy-v1",
-                    apiKeyFallback: nil,
-                    prefersCompatibleChat: false
-                )
+                return unavailablePiModelRoute(inferenceRoute: .automatic)
             }
             return piModelRoute(for: credential)
+        case .cloud:
+            guard let credential = await settings.resolveCloudCredential() else {
+                return unavailablePiModelRoute(inferenceRoute: .cloud)
+            }
+            return piModelRoute(for: credential)
+        }
+    }
+
+    private func localPiModelRoute() -> PiModelRoute {
+        PiModelRoute(
+            environment: [
+                "AGENTONE_MODEL_ROUTE": "local",
+                "AGENTONE_MODEL_PROVIDER": "ollama",
+                "AGENTONE_MODEL_ID": AgentModelSettings.localModel,
+                "AGENTONE_OLLAMA_BASE_URL": AgentModelSettings.localBaseURL
+            ],
+            inferenceRoute: .local,
+            usesModel: true,
+            usesCloud: false,
+            provider: "ollama",
+            model: AgentModelSettings.localModel,
+            apiKeyFallback: APIKeyChatFallback(
+                apiKey: "",
+                baseURL: URL(string: AgentModelSettings.localBaseURL)!,
+                model: AgentModelSettings.localModel,
+                provider: "ollama",
+                inferenceRoute: .local,
+                requiresAPIKey: false
+            ),
+            prefersCompatibleChat: true
+        )
+    }
+
+    private func unavailablePiModelRoute(inferenceRoute: ModelInferenceRoute) -> PiModelRoute {
+        PiModelRoute(
+            environment: ["AGENTONE_MODEL_ROUTE": "offline"],
+            inferenceRoute: inferenceRoute,
+            usesModel: false,
+            usesCloud: false,
+            provider: "agentone-offline",
+            model: "agentone-policy-v1",
+            apiKeyFallback: nil,
+            prefersCompatibleChat: false
+        )
+    }
+
+    private static func isLocalModelReady() async -> Bool {
+        guard let url = URL(string: "http://127.0.0.1:11434/api/tags") else { return false }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 1.5
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode),
+                  let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let models = root["models"] as? [[String: Any]] else {
+                return false
+            }
+            return models.contains { model in
+                let name = (model["name"] as? String) ?? (model["model"] as? String) ?? ""
+                return name == AgentModelSettings.localModel
+            }
+        } catch {
+            return false
         }
     }
 
@@ -1044,6 +1374,8 @@ final class AgentOneRuntime: ObservableObject {
                     "AGENTONE_KIMI_OS_VERSION": deviceHeaders.osVersion,
                     "AGENTONE_KIMI_DEVICE_ID": deviceHeaders.deviceID
                 ],
+                inferenceRoute: .cloud,
+                usesModel: true,
                 usesCloud: true,
                 provider: credential.provider,
                 model: credential.model,
@@ -1060,6 +1392,8 @@ final class AgentOneRuntime: ObservableObject {
                     "AGENTONE_OPENAI_BASE_URL": baseURL,
                     "OPENAI_API_KEY": apiKey
                 ],
+                inferenceRoute: .cloud,
+                usesModel: true,
                 usesCloud: true,
                 provider: credential.provider,
                 model: model,
@@ -1089,7 +1423,7 @@ final class AgentOneRuntime: ObservableObject {
         )
     }
 
-    private func recordCloudInvocation(
+    private func recordModelInvocation(
         plan: PiReminderWakePlan,
         attemptedRoute: PiModelRoute,
         result: PiResultPayload?,
@@ -1111,7 +1445,7 @@ final class AgentOneRuntime: ObservableObject {
         let audit = ModelInvocationAudit(
             timestamp: Date(),
             purpose: plan.reason,
-            route: .cloud,
+            route: attemptedRoute.inferenceRoute,
             provider: model?.provider ?? attemptedRoute.provider,
             model: model?.model ?? attemptedRoute.model,
             sentContextFields: Self.sentContextFields(in: plan.context),
@@ -1174,6 +1508,7 @@ final class AgentOneRuntime: ObservableObject {
             case .cloudProcessingDisabled: return "cloud_processing_disabled"
             case .sensitiveContextBlocked: return "sensitive_context_blocked"
             case .localModelUnavailable: return "local_model_unavailable"
+            case .localResourcesConstrained(let reason): return "local_resources_\(reason)"
             case .invalidServerResponse: return "invalid_server_response"
             case .server(let statusCode, _): return "model_server_\(statusCode)"
             }
@@ -1354,13 +1689,6 @@ final class AgentOneRuntime: ObservableObject {
             )
             return
         }
-        guard AgentModelSettings.shared.route != .local else {
-            AgentOneRuntimeHealthStore.shared.markModelAnalysisSkipped(
-                reason: "local_model_unavailable",
-                at: event.timestamp
-            )
-            return
-        }
         guard Self.hasConcreteContext(event.context) else {
             AgentOneRuntimeHealthStore.shared.markModelAnalysisSkipped(
                 reason: "no_concrete_context",
@@ -1405,6 +1733,10 @@ final class AgentOneRuntime: ObservableObject {
 
         let analysisID = UUID()
         contextAnalysisID = analysisID
+        activeContextAnalysis = DeferredContextAnalysis(
+            event: event,
+            analysisKey: analysisKey
+        )
         contextAnalysisTask = Task { [weak self] in
             do {
                 try await Task.sleep(nanoseconds: delayNanoseconds)
@@ -1418,7 +1750,7 @@ final class AgentOneRuntime: ObservableObject {
             defer { self.finishContextAnalysis(id: analysisID) }
 
             let route = await self.currentPiModelRoute()
-            guard route.usesCloud else {
+            guard route.usesModel else {
                 await self.recordPiContextAnalysisInvocation(
                     route: route,
                     result: nil,
@@ -1429,6 +1761,26 @@ final class AgentOneRuntime: ObservableObject {
                     reason: "missing_credential"
                 )
                 return
+            }
+
+            if route.inferenceRoute == .local {
+                let minimumIdleSeconds: TimeInterval = trigger == "submitted_output" ? 8 : 20
+                let decision = LocalInferenceResourcePolicy.evaluate(
+                    secondsSinceLastInteraction: self.systemMonitor.secondsSinceLastInteraction,
+                    minimumIdleSeconds: minimumIdleSeconds,
+                    userInitiated: false
+                )
+                guard decision.canRun else {
+                    self.deferredContextAnalysis = DeferredContextAnalysis(
+                        event: event,
+                        analysisKey: analysisKey
+                    )
+                    self.lastSemanticAnalysisAtByKey.removeValue(forKey: analysisKey)
+                    AgentOneRuntimeHealthStore.shared.markModelAnalysisSkipped(
+                        reason: "local_resources_\(decision.reason?.rawValue ?? "unknown")"
+                    )
+                    return
+                }
             }
 
             AgentOneRuntimeHealthStore.shared.markModelAnalysisStarted()
@@ -1467,13 +1819,15 @@ final class AgentOneRuntime: ObservableObject {
                         apiKey: fallback.apiKey,
                         baseURL: fallback.baseURL,
                         model: fallback.model,
-                        provider: route.provider
+                        provider: fallback.provider,
+                        route: fallback.inferenceRoute,
+                        requiresAPIKey: fallback.requiresAPIKey
                     )
                     analysis = direct.0
                     provider = direct.1.provider
                     model = direct.1.model
                     await self.recordContextAnalysisInvocation(
-                        credential: AgentModelSettings.shared.resolveAPIKeyFallback(),
+                        route: route,
                         inference: direct.1,
                         context: event.context,
                         error: nil
@@ -1489,6 +1843,9 @@ final class AgentOneRuntime: ObservableObject {
                     provider: provider,
                     model: model
                 )
+                if self.deferredContextAnalysis?.event.id == event.id {
+                    self.deferredContextAnalysis = nil
+                }
             } catch {
                 guard !Task.isCancelled else { return }
                 await self.recordPiContextAnalysisInvocation(
@@ -1542,6 +1899,7 @@ final class AgentOneRuntime: ObservableObject {
         guard contextAnalysisID == id else { return }
         contextAnalysisTask = nil
         contextAnalysisID = nil
+        activeContextAnalysis = nil
     }
 
     private func persistContextAnalysis(
@@ -1654,10 +2012,26 @@ final class AgentOneRuntime: ObservableObject {
     private func runCompanionMaintenance() {
         guard hasStarted else { return }
         updateLeisureContextState()
+        retryDeferredContextAnalysisIfPossible()
         if systemMonitor.secondsSinceLastInteraction >= 45 {
             scheduleDailyDigestIfNeeded()
         }
         evaluateProactiveOpportunity()
+    }
+
+    private func retryDeferredContextAnalysisIfPossible() {
+        guard contextAnalysisTask == nil,
+              let pending = deferredContextAnalysis,
+              let engine else { return }
+        let decision = LocalInferenceResourcePolicy.evaluate(
+            secondsSinceLastInteraction: systemMonitor.secondsSinceLastInteraction,
+            minimumIdleSeconds: 8,
+            userInitiated: false
+        )
+        guard decision.canRun else { return }
+        deferredContextAnalysis = nil
+        lastSemanticAnalysisAtByKey.removeValue(forKey: pending.analysisKey)
+        scheduleContextAnalysis(for: pending.event, engine: engine)
     }
 
     private func cancelDailyDigestForLiveActivity() {
@@ -1670,6 +2044,36 @@ final class AgentOneRuntime: ObservableObject {
         piSidecar.stopImmediately()
     }
 
+    /// Foreground input always wins over passive local inference. Context has
+    /// already been written before enrichment starts, so cancellation loses no
+    /// evidence: the newest interrupted analysis is retained for a later idle
+    /// retry. Explicit AgentOne chat is not cancelled here.
+    private func pauseBackgroundLocalInferenceForLiveActivity() {
+        cancelDailyDigestForLiveActivity()
+        guard AgentModelSettings.shared.route != .cloud else { return }
+
+        var stoppedSidecarWork = false
+        if let pending = activeContextAnalysis {
+            deferredContextAnalysis = pending
+            lastSemanticAnalysisAtByKey.removeValue(forKey: pending.analysisKey)
+            contextAnalysisTask?.cancel()
+            contextAnalysisTask = nil
+            contextAnalysisID = nil
+            activeContextAnalysis = nil
+            stoppedSidecarWork = true
+        }
+        if piWakeTask != nil {
+            piWakeTask?.cancel()
+            piWakeTask = nil
+            invalidatePendingPiReminder()
+            stoppedSidecarWork = true
+        }
+
+        if stoppedSidecarWork, chatTask == nil {
+            piSidecar.stopImmediately()
+        }
+    }
+
     private func scheduleDailyDigestIfNeeded() {
         guard dailyDigestTask == nil,
               contextAnalysisTask == nil,
@@ -1677,6 +2081,15 @@ final class AgentOneRuntime: ObservableObject {
               chatTask == nil,
               !companion.chat.isOpen,
               let engine else { return }
+
+        if AgentModelSettings.shared.route != .cloud {
+            let decision = LocalInferenceResourcePolicy.evaluate(
+                secondsSinceLastInteraction: systemMonitor.secondsSinceLastInteraction,
+                minimumIdleSeconds: 60,
+                userInitiated: false
+            )
+            guard decision.canRun else { return }
+        }
 
         let taskID = UUID()
         dailyDigestTaskID = taskID
@@ -1745,7 +2158,7 @@ final class AgentOneRuntime: ObservableObject {
         guard dailyMemories.count >= 3, !Task.isCancelled else { return }
         let personalMemories = await personalMemory(for: engine, excludingDay: replay.day)
         let route = await currentPiModelRoute()
-        guard route.usesCloud else { return }
+        guard route.usesModel else { return }
 
         let analysis: DailyContextDigestAnalysis
         var piResult: PiResultPayload?
@@ -1783,7 +2196,9 @@ final class AgentOneRuntime: ObservableObject {
                     apiKey: fallback.apiKey,
                     baseURL: fallback.baseURL,
                     model: fallback.model,
-                    provider: route.provider
+                    provider: fallback.provider,
+                    route: fallback.inferenceRoute,
+                    requiresAPIKey: fallback.requiresAPIKey
                 )
                 analysis = result.0
                 directResult = result.1
@@ -1982,7 +2397,7 @@ final class AgentOneRuntime: ObservableObject {
         let audit = ModelInvocationAudit(
             timestamp: Date(),
             purpose: "daily_context_digest",
-            route: .cloud,
+            route: route.inferenceRoute,
             provider: piResult?.model?.provider ?? directResult?.provider ?? route.provider,
             model: piResult?.model?.model ?? directResult?.model ?? route.model,
             sentContextFields: [
@@ -2117,7 +2532,7 @@ final class AgentOneRuntime: ObservableObject {
     }
 
     private func recordContextAnalysisInvocation(
-        credential: ResolvedCloudCredential?,
+        route: PiModelRoute,
         inference: ModelInferenceResult?,
         context: ActivityContext,
         error: Error?
@@ -2126,9 +2541,9 @@ final class AgentOneRuntime: ObservableObject {
         let audit = ModelInvocationAudit(
             timestamp: Date(),
             purpose: "context_enrichment",
-            route: .cloud,
-            provider: inference?.provider ?? credential?.provider ?? "unconfigured",
-            model: inference?.model ?? credential?.model ?? AgentModelSettings.shared.apiKeyModel,
+            route: inference?.route ?? route.inferenceRoute,
+            provider: inference?.provider ?? route.provider,
+            model: inference?.model ?? route.model,
             sentContextFields: inference?.sentContextFields ?? Self.sentContextFields(in: context),
             usage: nil,
             succeeded: inference != nil && error == nil,
@@ -2158,7 +2573,7 @@ final class AgentOneRuntime: ObservableObject {
         let audit = ModelInvocationAudit(
             timestamp: Date(),
             purpose: "context_enrichment",
-            route: .cloud,
+            route: route.inferenceRoute,
             provider: result?.model?.provider ?? route.provider,
             model: result?.model?.model ?? route.model,
             sentContextFields: Self.sentContextFields(in: context),
@@ -2347,6 +2762,9 @@ final class AgentOneRuntime: ObservableObject {
             engine = ContextMemoryEngine(diary: diary)
             configuredDiaryURL = diaryURL
             modelAuditStore = ModelInvocationAuditStore(rootURL: AgentHomePreferences.rootURL)
+            returnCaptureDiagnosticStore = ReturnCaptureDiagnosticStore(
+                rootURL: AgentHomePreferences.rootURL
+            )
         } catch {
             engine = nil
             configuredDiaryURL = nil
@@ -2396,6 +2814,7 @@ final class AgentOneRuntime: ObservableObject {
         guard let text = boundedContextText(value, limit: 8_000), text.count >= 2 else {
             return nil
         }
+        guard !ReturnInputCaptureContract.isLikelyInterfaceChrome(text) else { return nil }
         let normalized = text.lowercased()
         let generic = [
             active?.applicationName,
@@ -2410,7 +2829,7 @@ final class AgentOneRuntime: ObservableObject {
     private static func focusedSubmittedText(
         from active: ActiveApplicationContext?
     ) -> String? {
-        guard let active else { return nil }
+        guard let active, isTrustedInputContext(active) else { return nil }
         let extracted = FocusedTextSubmissionExtractor.extract(
             focusedText: active.focusedText,
             selectionRange: active.focusedSelectionRange,
@@ -2419,6 +2838,186 @@ final class AgentOneRuntime: ObservableObject {
             focusedRole: active.focusedRole
         )
         return meaningfulSubmittedText(extracted, active: active)
+    }
+
+    private static func isTrustedInputContext(_ active: ActiveApplicationContext) -> Bool {
+        guard !active.isSecureInput else { return false }
+        let role = active.focusedRole?.lowercased() ?? ""
+        let profile = ReturnInputComposerProfile.resolve(
+            bundleIdentifier: active.bundleIdentifier,
+            applicationName: active.applicationName
+        )
+        let directInput = role.contains("textfield")
+            || role.contains("textarea")
+            || role.contains("combobox")
+        if directInput {
+            if profile == .generic { return true }
+            guard let windowFrame = active.windowFrame,
+                  let focusedFrame = active.focusedFrame else {
+                return false
+            }
+            return profile.acceptsTrustedInputGeometry(focusedFrame, in: windowFrame)
+        }
+
+        // AXWebArea/AXDocument are common wrappers in Electron, but they are
+        // also used for chat history, sidebars and entire documents. Trust them
+        // only when macOS exposes a concrete caret/selection inside the text.
+        let wrapper = role.contains("webarea") || role.contains("document")
+        guard wrapper,
+              active.focusedSelectionRange != nil,
+              let caretFrame = active.focusedCaretFrame else {
+            return false
+        }
+        if profile == .generic { return true }
+        guard let windowFrame = active.windowFrame else { return false }
+        return profile.acceptsTrustedInputGeometry(caretFrame, in: windowFrame)
+    }
+
+    private static func clickSupportsInputContext(
+        _ point: CGPoint,
+        active: ActiveApplicationContext
+    ) -> Bool {
+        let profile = ReturnInputComposerProfile.resolve(
+            bundleIdentifier: active.bundleIdentifier,
+            applicationName: active.applicationName
+        )
+        if profile != .generic {
+            guard let windowFrame = active.windowFrame,
+                  profile.validatesTypingAnchor(
+                    point,
+                    focusedFrame: active.focusedFrame,
+                    caretFrame: active.focusedCaretFrame,
+                    in: windowFrame
+                  ) else {
+                return false
+            }
+            return true
+        }
+        if let frame = active.focusedFrame {
+            let padding = max(12, min(30, frame.height * 0.30))
+            return frame.insetBy(dx: -padding, dy: -padding).contains(point)
+        } else if let caret = active.focusedCaretFrame {
+            return caret.insetBy(dx: -120, dy: -48).contains(point)
+        }
+        return false
+    }
+
+    private func updateDraftCache(
+        from active: ActiveApplicationContext?,
+        for signal: SystemActivitySignal
+    ) {
+        guard let active,
+              !active.isSecureInput,
+              active.bundleIdentifier?.lowercased() != Self.ownBundleIdentifier,
+              !SensitiveContextPolicy.isProtectedSurface(
+                bundleIdentifier: active.bundleIdentifier,
+                windowTitle: active.windowTitle,
+                focusedRole: active.focusedRole
+              ) else {
+            cachedDraftContext = nil
+            cachedDraftInputHint = nil
+            cachedDraftInputAnchorSource = nil
+            retainedInputSessionAnchor = nil
+            lastPrimaryClickHint = nil
+            return
+        }
+
+        let validatedHint = lastPrimaryClickHint.flatMap { hint -> InputFocusHint? in
+            guard signal.timestamp.timeIntervalSince(hint.capturedAt) <= 15,
+                  hint.bundleIdentifier == nil
+                    || active.bundleIdentifier == nil
+                    || hint.bundleIdentifier == active.bundleIdentifier,
+                  Self.clickSupportsInputContext(hint.point, active: active) else {
+                return nil
+            }
+            return hint
+        }
+        let profile = ReturnInputComposerProfile.resolve(
+            bundleIdentifier: active.bundleIdentifier,
+            applicationName: active.applicationName
+        )
+        let retainedHint: InputFocusHint? = {
+            guard validatedHint == nil,
+                  let retainedInputSessionAnchor,
+                  let windowFrame = active.windowFrame,
+                  let point = retainedInputSessionAnchor.resolvedPoint(
+                    bundleIdentifier: active.bundleIdentifier,
+                    windowIdentifier: active.windowIdentifier,
+                    windowFrame: windowFrame,
+                    focusedFrame: active.focusedFrame,
+                    caretFrame: active.focusedCaretFrame,
+                    profile: profile,
+                    at: signal.timestamp
+                  ) else {
+                return nil
+            }
+            return InputFocusHint(
+                point: point,
+                bundleIdentifier: active.bundleIdentifier,
+                capturedAt: signal.timestamp
+            )
+        }()
+
+        if let validatedHint {
+            cachedDraftContext = active
+            cachedDraftInputHint = validatedHint
+            cachedDraftInputAnchorSource = .typingBurst
+            if let windowFrame = active.windowFrame {
+                retainedInputSessionAnchor = ReturnInputSessionAnchor(
+                    point: validatedHint.point,
+                    bundleIdentifier: active.bundleIdentifier,
+                    windowIdentifier: active.windowIdentifier,
+                    windowFrame: windowFrame,
+                    capturedAt: signal.timestamp
+                )
+            }
+            // This click has been promoted into a validated input-session
+            // anchor. It must no longer be reconsidered as generic navigation.
+            lastPrimaryClickHint = nil
+        } else if let retainedHint {
+            cachedDraftContext = active
+            cachedDraftInputHint = retainedHint
+            cachedDraftInputAnchorSource = .retainedSession
+        } else if Self.isTrustedInputContext(active) {
+            // A concrete AX editor supersedes an old chat composer. This matters
+            // in Feishu where the user can move from the bottom chat box to a
+            // document/comment editor without changing applications.
+            retainedInputSessionAnchor = nil
+            cachedDraftContext = active
+            cachedDraftInputHint = nil
+            cachedDraftInputAnchorSource = .axFocus
+        } else {
+            cachedDraftContext = nil
+            cachedDraftInputHint = nil
+            cachedDraftInputAnchorSource = nil
+        }
+
+        if let cachedDraftContext {
+            preReturnInputEvidenceBuffer.update(
+                active: cachedDraftContext,
+                interactionPoint: cachedDraftInputHint?.point,
+                profile: profile,
+                signalTimestamp: signal.timestamp,
+                startsNewSubmission: signal.kind == .typingStarted
+            )
+        } else {
+            preReturnInputEvidenceBuffer.clear()
+        }
+    }
+
+    /// Input geometry is sampled synchronously while the global listen-only
+    /// key callback is still being delivered to the main actor. It remains a
+    /// read-only AX lookup, but it cannot be lost when a following Return
+    /// cancels the slower diary preparation task.
+    private static func immediateInputContext(
+        for signal: SystemActivitySignal
+    ) -> ActiveApplicationContext? {
+        switch signal.kind {
+        case .typingStarted, .typingProgress, .returnPressed:
+            return ActiveContextReader.read(scope: .focusedElement)
+        default:
+            return nil
+        }
     }
 
     private static func richerActiveContext(

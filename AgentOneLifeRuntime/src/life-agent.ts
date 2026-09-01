@@ -71,8 +71,8 @@ export interface WakeResult {
 export type ChatResult = WakeResult;
 
 export interface RuntimeModelConfiguration {
-  route: "offline" | "cloud";
-  provider: "agentone-offline" | "openai-compatible-completions" | "kimi-coding";
+  route: "offline" | "local" | "cloud";
+  provider: "agentone-offline" | "ollama" | "openai-compatible-completions" | "kimi-coding";
   model: string;
   apiKey?: string;
   baseUrl?: string;
@@ -82,9 +82,26 @@ export interface RuntimeModelConfiguration {
 export function runtimeModelConfigurationFromEnvironment(
   environment: Record<string, string | undefined> = process.env,
 ): RuntimeModelConfiguration {
-  const requestedRoute = environment.AGENTONE_MODEL_ROUTE === "cloud" ? "cloud" : "offline";
+  const requestedRoute = environment.AGENTONE_MODEL_ROUTE === "cloud"
+    ? "cloud"
+    : environment.AGENTONE_MODEL_ROUTE === "local"
+      ? "local"
+      : "offline";
   const kimiAccessToken = environment.AGENTONE_KIMI_ACCESS_TOKEN?.trim();
   const apiKey = environment.OPENAI_API_KEY?.trim();
+  if (requestedRoute === "local") {
+    const baseUrl = normalizedBaseUrl(environment.AGENTONE_OLLAMA_BASE_URL)
+      || "http://127.0.0.1:11434/v1";
+    return {
+      route: "local",
+      provider: "ollama",
+      model: environment.AGENTONE_MODEL_ID?.trim() || "llama3.2:3b",
+      // pi-ai expects an authentication callback for OpenAI-compatible
+      // providers. Ollama ignores this loopback-only, non-secret placeholder.
+      apiKey: "ollama-local",
+      baseUrl,
+    };
+  }
   if (requestedRoute === "cloud" && kimiAccessToken) {
     const baseUrl = normalizedBaseUrl(environment.AGENTONE_KIMI_BASE_URL);
     return {
@@ -166,7 +183,7 @@ export async function runChat(
       tools: [],
       messages: [],
     },
-    ...(modelConfiguration.route === "cloud"
+    ...(modelConfiguration.route !== "offline"
       ? { getApiKey: (_provider: string) => modelConfiguration.apiKey }
       : {}),
     maxRetryDelayMs: 2_000,
@@ -359,11 +376,11 @@ function resolveModel(
   configuration: RuntimeModelConfiguration,
   allowedTools: Set<SafeToolName>,
 ): { model: Model<any>; cleanup: () => void } {
-  if (configuration.route === "cloud") {
+  if (configuration.route !== "offline") {
     if (!configuration.apiKey) {
-      throw new RuntimePolicyError("model_credential_missing", "Cloud model API key is missing.");
+      throw new RuntimePolicyError("model_credential_missing", "Model credential is missing.");
     }
-    if (configuration.provider !== "openai-compatible-completions" && configuration.provider !== "kimi-coding") {
+    if (configuration.provider !== "ollama" && configuration.provider !== "openai-compatible-completions" && configuration.provider !== "kimi-coding") {
       throw new RuntimePolicyError("model_provider_unsupported", `Unsupported model provider: ${configuration.provider}`);
     }
     const known = getModel("kimi-coding", configuration.provider === "kimi-coding"
@@ -380,8 +397,10 @@ function resolveModel(
           id: configuration.model,
           name: configuration.model,
           api: "openai-completions",
-          provider: "openai-compatible-completions",
-          baseUrl: configuration.baseUrl || "http://algoagent.zhuaninc.com/algo",
+          provider: configuration.provider,
+          baseUrl: configuration.baseUrl || (configuration.provider === "ollama"
+            ? "http://127.0.0.1:11434/v1"
+            : "http://algoagent.zhuaninc.com/algo"),
           reasoning: false,
           input: ["text"],
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -413,11 +432,11 @@ function resolveChatModel(
   payload: ChatPayload,
   configuration: RuntimeModelConfiguration,
 ): { model: Model<any>; cleanup: () => void } {
-  if (configuration.route === "cloud") {
+  if (configuration.route !== "offline") {
     if (!configuration.apiKey) {
-      throw new RuntimePolicyError("model_credential_missing", "Cloud model API key is missing.");
+      throw new RuntimePolicyError("model_credential_missing", "Model credential is missing.");
     }
-    if (configuration.provider !== "openai-compatible-completions" && configuration.provider !== "kimi-coding") {
+    if (configuration.provider !== "ollama" && configuration.provider !== "openai-compatible-completions" && configuration.provider !== "kimi-coding") {
       throw new RuntimePolicyError("model_provider_unsupported", `Unsupported model provider: ${configuration.provider}`);
     }
     const known = getModel("kimi-coding", configuration.provider === "kimi-coding"
@@ -434,8 +453,10 @@ function resolveChatModel(
           id: configuration.model,
           name: configuration.model,
           api: "openai-completions",
-          provider: "openai-compatible-completions",
-          baseUrl: configuration.baseUrl || "http://algoagent.zhuaninc.com/algo",
+          provider: configuration.provider,
+          baseUrl: configuration.baseUrl || (configuration.provider === "ollama"
+            ? "http://127.0.0.1:11434/v1"
+            : "http://algoagent.zhuaninc.com/algo"),
           reasoning: false,
           input: ["text"],
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },

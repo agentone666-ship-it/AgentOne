@@ -103,6 +103,8 @@ struct AgentOneSettingsView: View {
                             .lineSpacing(3)
                     }
 
+                    LocalModelStatusCard(modelSettings: modelSettings)
+
                     KimiConnectionCard(
                         modelSettings: modelSettings,
                         detail: "使用 Kimi Code 订阅来思考。浏览器只负责 Kimi 授权，AgentOne 仍然没有产品账号。",
@@ -166,8 +168,8 @@ struct AgentOneSettingsView: View {
 
                     Divider().overlay(AgentOnePalette.separator)
                     SettingsToggleRow(
-                        title: "显示云端调用记录",
-                        detail: "在日记中标出何时、为何及哪些 Context 离开过设备。",
+                        title: "显示模型调用记录",
+                        detail: "记录本地或云端模型何时、为何被唤醒。只有云端路由才会标出哪些 Context 离开过设备。",
                         isOn: $cloudLedgerEnabled
                     )
                 }
@@ -278,6 +280,9 @@ struct AgentOneSettingsView: View {
         .sheet(isPresented: $showsCredentialEditor) {
             ModelCredentialEditor(settings: modelSettings)
         }
+        .task {
+            await modelSettings.refreshLocalModelStatus()
+        }
     }
 
     private var surpriseFrequencyLabel: String {
@@ -310,6 +315,98 @@ struct AgentOneSettingsView: View {
             content()
         }
         .agentOneCard()
+    }
+}
+
+private struct LocalModelStatusCard: View {
+    @ObservedObject var modelSettings: AgentModelSettings
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AgentOneMetric.spacingM) {
+            Image(systemName: symbol)
+                .foregroundStyle(tint)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: AgentOneMetric.spacingXS) {
+                HStack(spacing: AgentOneMetric.spacingS) {
+                    Text("Meta 本地模型")
+                        .font(AgentOneType.caption)
+                        .fontWeight(.semibold)
+                    AgentOnePill(title: statusTitle, tint: tint)
+                }
+                Text("\(AgentModelSettings.localModel) · Ollama · 不需要 API Key")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(AgentOnePalette.textSecondary)
+                Text(statusDetail)
+                    .font(AgentOneType.caption)
+                    .foregroundStyle(AgentOnePalette.textTertiary)
+                    .lineSpacing(3)
+                if let message = modelSettings.localModelTestMessage {
+                    Text(message)
+                        .font(AgentOneType.caption)
+                        .foregroundStyle(modelSettings.localModelStatus.isReady ? AgentOnePalette.mint : .red.opacity(0.86))
+                        .lineLimit(3)
+                }
+            }
+            Spacer(minLength: AgentOneMetric.spacingM)
+            VStack(spacing: AgentOneMetric.spacingS) {
+                Button("刷新") {
+                    Task { await modelSettings.refreshLocalModelStatus() }
+                }
+                .buttonStyle(QuietActionButtonStyle())
+                Button(modelSettings.isTestingLocalModel ? "测试中…" : "测试本地模型") {
+                    Task { _ = await modelSettings.testLocalModel() }
+                }
+                .buttonStyle(PrimaryActionButtonStyle())
+                .disabled(!modelSettings.localModelStatus.isReady || modelSettings.isTestingLocalModel)
+            }
+        }
+        .padding(AgentOneMetric.spacingM)
+        .background(
+            AgentOnePalette.surface2.opacity(0.55),
+            in: RoundedRectangle(cornerRadius: AgentOneMetric.radiusSmall, style: .continuous)
+        )
+    }
+
+    private var symbol: String {
+        switch modelSettings.localModelStatus {
+        case .checking: "arrow.triangle.2.circlepath"
+        case .serviceUnavailable: "bolt.slash.fill"
+        case .modelMissing: "square.and.arrow.down.fill"
+        case .ready: "checkmark.circle.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch modelSettings.localModelStatus {
+        case .ready: AgentOnePalette.mint
+        case .checking: AgentOnePalette.blue
+        case .serviceUnavailable, .modelMissing: AgentOnePalette.amber
+        }
+    }
+
+    private var statusTitle: String {
+        switch modelSettings.localModelStatus {
+        case .checking: "检查中"
+        case .serviceUnavailable: "服务未运行"
+        case .modelMissing: "模型未安装"
+        case .ready: "可运行"
+        }
+    }
+
+    private var statusDetail: String {
+        switch modelSettings.localModelStatus {
+        case .checking:
+            return "正在检查 127.0.0.1:11434。"
+        case .serviceUnavailable:
+            return "Ollama 没有响应；AgentOne 不会假装已经使用本地模型。"
+        case .modelMissing:
+            return "Ollama 已运行，但还没有找到这个模型。"
+        case .ready(let sizeBytes):
+            if let sizeBytes {
+                return "已安装，约 \(ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file))；截图先由 macOS Vision 本地 OCR，再由轻量模型分析 Context。模型空闲后自动卸载。"
+            }
+            return "已安装；截图先由 macOS Vision 本地 OCR，再由轻量模型分析 Context。模型空闲后自动卸载。"
+        }
     }
 }
 

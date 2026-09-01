@@ -1,7 +1,10 @@
-import XCTest
+import Foundation
+import Testing
 @testable import AgentOneCore
 
-final class ReplayProjectionTests: XCTestCase {
+@Suite
+struct ReplayProjectionTests {
+    @Test
     func testContextLogAndAgentJournalAreDisjointProjections() {
         let timestamp = Date(timeIntervalSince1970: 1_722_787_200)
         let digest = DailyContextDigest(
@@ -35,16 +38,17 @@ final class ReplayProjectionTests: XCTestCase {
             evidence: []
         )
 
-        XCTAssertEqual(replay.contextLogMoments.map(\.id), [activity.id, evidence.id])
-        XCTAssertEqual(replay.agentJournalMoments.map(\.id), [thought.id])
-        XCTAssertEqual(replay.latestDailyContextDigest, digest)
-        XCTAssertTrue(Set(replay.contextLogMoments.map(\.id)).isDisjoint(
+        #expect(replay.contextLogMoments.map(\.id) == [activity.id, evidence.id])
+        #expect(replay.agentJournalMoments.map(\.id) == [thought.id])
+        #expect(replay.latestDailyContextDigest == digest)
+        #expect(Set(replay.contextLogMoments.map(\.id)).isDisjoint(
             with: Set(replay.agentJournalMoments.map(\.id))
         ))
-        XCTAssertFalse(replay.contextLogMoments.contains { $0.kind == .summary || $0.kind == .thought })
-        XCTAssertFalse(replay.agentJournalMoments.contains { $0.kind != .thought })
+        #expect(!(replay.contextLogMoments.contains { $0.kind == .summary || $0.kind == .thought }))
+        #expect(!(replay.agentJournalMoments.contains { $0.kind != .thought }))
     }
 
+    @Test
     func testAllFactualContextKindsRemainInReplay() {
         let timestamp = Date(timeIntervalSince1970: 1_722_787_200)
         let kinds: [ReplayMomentKind] = [
@@ -59,8 +63,8 @@ final class ReplayProjectionTests: XCTestCase {
         }
         let replay = SemanticReplay(day: "2026-08-10", moments: moments, evidence: [])
 
-        XCTAssertEqual(replay.contextLogMoments.map(\.kind), kinds)
-        XCTAssertTrue(replay.agentJournalMoments.isEmpty)
+        #expect(replay.contextLogMoments.map(\.kind) == kinds)
+        #expect(replay.agentJournalMoments.isEmpty)
     }
 
     private func makeMoment(

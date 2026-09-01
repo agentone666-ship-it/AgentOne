@@ -46,7 +46,7 @@ public struct KeyboardSignalReducer: Sendable {
 
     public init(
         typingSessionGap: TimeInterval = 1.5,
-        typingProgressInterval: TimeInterval = 5
+        typingProgressInterval: TimeInterval = 0.75
     ) {
         self.typingSessionGap = typingSessionGap
         self.typingProgressInterval = typingProgressInterval
@@ -62,6 +62,11 @@ public struct KeyboardSignalReducer: Sendable {
         case .returnKey:
             recentDeletionCount = 0
             typingCharactersSinceProgress = 0
+            // Return closes the current draft. The very next physical text key
+            // must start a fresh typing burst even when it arrives within the
+            // normal coalescing gap. Otherwise a short second message can
+            // reach Return without refreshing its input Context.
+            lastTypingAt = nil
             lastTypingProgressAt = observation.timestamp
             return [.returnPressed]
 
@@ -101,5 +106,14 @@ public struct KeyboardSignalReducer: Sendable {
             lastTypingProgressAt = observation.timestamp
             return [.typingProgress(estimatedCharacterCount: progress)]
         }
+    }
+
+    /// Pointer focus changes and application switches delimit typing bursts
+    /// even if they happen faster than `typingSessionGap`.
+    public mutating func resetTypingSession() {
+        lastTypingAt = nil
+        lastTypingProgressAt = nil
+        typingCharactersSinceProgress = 0
+        recentDeletionCount = 0
     }
 }

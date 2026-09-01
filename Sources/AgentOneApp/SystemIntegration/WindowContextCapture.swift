@@ -9,8 +9,44 @@ enum WindowContextCaptureError: Error {
     case permissionDenied
     case noFrontmostApplication
     case noShareableWindow
-    case noInputRegion
-    case pngEncodingFailed
+    case noInputRegion(ReturnCaptureAttemptMetadata)
+    case pngEncodingFailed(ReturnCaptureAttemptMetadata)
+
+    var diagnosticReason: String {
+        switch self {
+        case .permissionDenied:
+            "screen_recording_permission"
+        case .noFrontmostApplication:
+            "no_frontmost_application"
+        case .noShareableWindow:
+            "no_shareable_window"
+        case .noInputRegion:
+            "no_input_region"
+        case .pngEncodingFailed:
+            "png_encoding_failed"
+        }
+    }
+
+    var attemptMetadata: ReturnCaptureAttemptMetadata? {
+        switch self {
+        case .noInputRegion(let metadata), .pngEncodingFailed(let metadata):
+            metadata
+        case .permissionDenied, .noFrontmostApplication, .noShareableWindow:
+            nil
+        }
+    }
+}
+
+struct ReturnCaptureAttemptMetadata: Sendable {
+    let windowFrame: CGRect
+    let visionRegions: [ReturnInputCaptureRegion]
+    let axRegions: [ReturnInputCaptureRegion]
+    let selectedRegion: ReturnInputCaptureRegion?
+    let selectedSource: ReturnInputCaptureSource?
+    let fullScreenOCRLineCount: Int
+    let recognizedLineCount: Int
+    let cropPixelWidth: Int
+    let cropPixelHeight: Int
 }
 
 struct CapturedKeyMoment: Sendable {
@@ -23,6 +59,10 @@ struct CapturedKeyMoment: Sendable {
     let cropPixelWidth: Int
     let cropPixelHeight: Int
     let windowTitle: String?
+    let windowFrame: CGRect
+    let visionRegions: [ReturnInputCaptureRegion]
+    let axRegions: [ReturnInputCaptureRegion]
+    let selectedRegion: ReturnInputCaptureRegion
 }
 
 /// Captures one user-authorized key screenshot. It never records video and
@@ -43,7 +83,8 @@ enum WindowContextCapture {
         focusedFrame: CGRect? = nil,
         caretFrame: CGRect? = nil,
         referenceText: String? = nil,
-        interactionPoint: CGPoint? = nil
+        interactionPoint: CGPoint? = nil,
+        profile: ReturnInputComposerProfile = .generic
     ) async throws -> CapturedKeyMoment {
         guard hasScreenRecordingPermission else {
             throw WindowContextCaptureError.permissionDenied
@@ -119,7 +160,8 @@ enum WindowContextCapture {
                 windowFrame: window.frame,
                 displayFrame: display.frame,
                 referenceText: referenceText,
-                interactionPoint: interactionPoint
+                interactionPoint: interactionPoint,
+                profile: profile
             )
         } ?? []
         let axRegions = ReturnInputCaptureContract.regions(
@@ -127,7 +169,8 @@ enum WindowContextCapture {
             caretFrame: caretFrame,
             windowFrame: window.frame,
             interactionPoint: interactionPoint,
-            interactionCoordinateFrame: display?.frame
+            interactionCoordinateFrame: display?.frame,
+            profile: profile
         )
         // Vision-derived regions lead the candidate list, while AX/caret
         // regions remain as a reliable fallback for an empty or already-cleared
@@ -149,6 +192,7 @@ enum WindowContextCapture {
             cropCandidates.append(
                 CropCandidate(
                     image: crop,
+                    region: region,
                     metadata: ReturnInputOCRCandidate(
                         id: index,
                         source: region.source,
@@ -166,11 +210,31 @@ enum WindowContextCapture {
             referenceText: referenceText
         ),
         let selected = cropCandidates.first(where: { $0.metadata.id == selectedMetadata.id }) else {
-            throw WindowContextCaptureError.noInputRegion
+            throw WindowContextCaptureError.noInputRegion(ReturnCaptureAttemptMetadata(
+                windowFrame: window.frame,
+                visionRegions: visionRegions,
+                axRegions: axRegions,
+                selectedRegion: nil,
+                selectedSource: nil,
+                fullScreenOCRLineCount: fullScreenLines.count,
+                recognizedLineCount: 0,
+                cropPixelWidth: 0,
+                cropPixelHeight: 0
+            ))
         }
         let bitmap = NSBitmapImageRep(cgImage: selected.image)
         guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
-            throw WindowContextCaptureError.pngEncodingFailed
+            throw WindowContextCaptureError.pngEncodingFailed(ReturnCaptureAttemptMetadata(
+                windowFrame: window.frame,
+                visionRegions: visionRegions,
+                axRegions: axRegions,
+                selectedRegion: selected.region,
+                selectedSource: selectedMetadata.source,
+                fullScreenOCRLineCount: fullScreenLines.count,
+                recognizedLineCount: selectedMetadata.recognizedLineCount,
+                cropPixelWidth: selected.image.width,
+                cropPixelHeight: selected.image.height
+            ))
         }
         return CapturedKeyMoment(
             pngData: pngData,
@@ -181,7 +245,174 @@ enum WindowContextCapture {
             source: selectedMetadata.source,
             cropPixelWidth: selected.image.width,
             cropPixelHeight: selected.image.height,
-            windowTitle: window.title
+            windowTitle: window.title,
+            windowFrame: window.frame,
+            visionRegions: visionRegions,
+            axRegions: axRegions,
+            selectedRegion: selected.region
+        )
+    }
+
+    /// Runs the same input-region locator/OCR contract against a window frame
+    /// that was already captured before Return. The full image remains memory
+    /// only until the caller applies the sensitive-content policy.
+    static func captureBufferedWindow(
+        _ image: CGImage,
+        windowFrame: CGRect,
+        focusedFrame: CGRect? = nil,
+        caretFrame: CGRect? = nil,
+        referenceText: String? = nil,
+        interactionPoint: CGPoint? = nil,
+        profile: ReturnInputComposerProfile = .generic
+    ) throws -> CapturedKeyMoment {
+        let fullWindowLines = recognizeTextLines(in: image)
+        let visionRegions = ReturnInputCaptureContract.regionsFromFullScreenOCR(
+            lines: fullWindowLines,
+            focusedFrame: focusedFrame,
+            caretFrame: caretFrame,
+            windowFrame: windowFrame,
+            displayFrame: windowFrame,
+            referenceText: referenceText,
+            interactionPoint: interactionPoint,
+            profile: profile
+        )
+        let axRegions = ReturnInputCaptureContract.regions(
+            focusedFrame: focusedFrame,
+            caretFrame: caretFrame,
+            windowFrame: windowFrame,
+            interactionPoint: interactionPoint,
+            interactionCoordinateFrame: windowFrame,
+            profile: profile
+        )
+        return try makeCapturedMoment(
+            windowImage: image,
+            fullScreenOCRLineCount: fullWindowLines.count,
+            windowTitle: nil,
+            windowFrame: windowFrame,
+            visionRegions: visionRegions,
+            axRegions: axRegions,
+            referenceText: referenceText
+        )
+    }
+
+    /// Captures the exact input ROI that was validated while typing and frozen
+    /// before Return. This path deliberately performs no window-wide OCR, no
+    /// composer re-location, and no post-submit bubble recovery.
+    static func captureBufferedInputRegion(
+        _ image: CGImage,
+        windowFrame: CGRect,
+        region: ReturnInputCaptureRegion,
+        referenceText: String? = nil,
+        profile: ReturnInputComposerProfile = .generic
+    ) throws -> CapturedKeyMoment {
+        guard let constrained = ReturnInputCaptureContract.constrainedPreSubmissionRegion(
+            region,
+            profile: profile
+        ),
+        let initialCrop = crop(image, to: constrained) else {
+            throw WindowContextCaptureError.noInputRegion(ReturnCaptureAttemptMetadata(
+                windowFrame: windowFrame,
+                visionRegions: [],
+                axRegions: [region],
+                selectedRegion: nil,
+                selectedSource: nil,
+                fullScreenOCRLineCount: 0,
+                recognizedLineCount: 0,
+                cropPixelWidth: 0,
+                cropPixelHeight: 0
+            ))
+        }
+
+        let initialSpatialLines = ReturnInputCaptureContract.spatiallyValidPreSubmissionLines(
+            recognizeTextLines(in: initialCrop),
+            within: constrained,
+            profile: profile
+        )
+        let initialLines = ReturnInputCaptureContract.preSubmissionEvidenceLines(
+            initialSpatialLines,
+            referenceText: referenceText
+        )
+        let initialText = ScreenshotTextExtraction.fullText(from: initialLines, limit: 6_000)
+        let initialSubmittedText = ScreenshotTextExtraction.preferredSubmittedText(
+            focusedRegionText: initialText,
+            inferredSubmittedText: ScreenshotTextExtraction.inferredSubmittedText(from: initialLines)
+        )
+        guard ReturnSubmissionEvidenceSelector.supportsPreSubmissionEvidence(
+            evidenceText: initialSubmittedText ?? initialText,
+            referenceText: referenceText
+        ) else {
+            throw WindowContextCaptureError.noInputRegion(ReturnCaptureAttemptMetadata(
+                windowFrame: windowFrame,
+                visionRegions: [],
+                axRegions: [constrained],
+                selectedRegion: constrained,
+                selectedSource: constrained.source,
+                fullScreenOCRLineCount: 0,
+                recognizedLineCount: initialLines.count,
+                cropPixelWidth: initialCrop.width,
+                cropPixelHeight: initialCrop.height
+            ))
+        }
+
+        let tightened = ReturnInputCaptureContract.tightenedPreSubmissionRegion(
+            within: constrained,
+            meaningfulLines: initialLines
+        ) ?? constrained
+        let tightenedCrop = crop(image, to: tightened) ?? initialCrop
+        let finalSpatialLines = ReturnInputCaptureContract.spatiallyValidPreSubmissionLines(
+            recognizeTextLines(in: tightenedCrop),
+            within: tightened,
+            profile: profile
+        )
+        let finalLines = ReturnInputCaptureContract.preSubmissionEvidenceLines(
+            finalSpatialLines,
+            referenceText: referenceText
+        )
+        let finalText = ScreenshotTextExtraction.fullText(from: finalLines, limit: 6_000)
+        let finalSubmittedText = ScreenshotTextExtraction.preferredSubmittedText(
+            focusedRegionText: finalText,
+            inferredSubmittedText: ScreenshotTextExtraction.inferredSubmittedText(from: finalLines)
+        )
+        let finalEvidenceText = finalSubmittedText ?? finalText
+        let useFinalOCR = ReturnSubmissionEvidenceSelector.supportsPreSubmissionEvidence(
+            evidenceText: finalEvidenceText,
+            referenceText: referenceText
+        )
+        let selectedCrop = useFinalOCR ? tightenedCrop : initialCrop
+        let selectedRegion = useFinalOCR ? tightened : constrained
+        let recognizedText = useFinalOCR ? finalText : initialText
+        let submittedText = useFinalOCR ? finalSubmittedText : initialSubmittedText
+        let recognizedLineCount = useFinalOCR ? finalLines.count : initialLines.count
+
+        let bitmap = NSBitmapImageRep(cgImage: selectedCrop)
+        guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            throw WindowContextCaptureError.pngEncodingFailed(ReturnCaptureAttemptMetadata(
+                windowFrame: windowFrame,
+                visionRegions: [],
+                axRegions: [constrained],
+                selectedRegion: selectedRegion,
+                selectedSource: selectedRegion.source,
+                fullScreenOCRLineCount: 0,
+                recognizedLineCount: recognizedLineCount,
+                cropPixelWidth: selectedCrop.width,
+                cropPixelHeight: selectedCrop.height
+            ))
+        }
+
+        return CapturedKeyMoment(
+            pngData: pngData,
+            recognizedText: recognizedText,
+            submittedTextCandidate: submittedText,
+            recognizedLineCount: recognizedLineCount,
+            fullScreenOCRLineCount: 0,
+            source: selectedRegion.source,
+            cropPixelWidth: selectedCrop.width,
+            cropPixelHeight: selectedCrop.height,
+            windowTitle: nil,
+            windowFrame: windowFrame,
+            visionRegions: [],
+            axRegions: [constrained],
+            selectedRegion: selectedRegion
         )
     }
 
@@ -228,6 +459,91 @@ enum WindowContextCapture {
                 confidence: Double(candidate.confidence)
             )
         }
+    }
+
+    private static func makeCapturedMoment(
+        windowImage: CGImage,
+        fullScreenOCRLineCount: Int,
+        windowTitle: String?,
+        windowFrame: CGRect,
+        visionRegions: [ReturnInputCaptureRegion],
+        axRegions: [ReturnInputCaptureRegion],
+        referenceText: String?
+    ) throws -> CapturedKeyMoment {
+        let regions = visionRegions + axRegions
+        var cropCandidates: [CropCandidate] = []
+        for (index, region) in regions.enumerated() {
+            guard let crop = crop(windowImage, to: region) else { continue }
+            let lines = recognizeTextLines(in: crop)
+            let recognizedText = ScreenshotTextExtraction.fullText(from: lines, limit: 6_000)
+            let inferredSubmittedText = ScreenshotTextExtraction.inferredSubmittedText(from: lines)
+            let submittedText = ScreenshotTextExtraction.preferredSubmittedText(
+                focusedRegionText: recognizedText,
+                inferredSubmittedText: inferredSubmittedText
+            )
+            let confidence = lines.isEmpty
+                ? 0
+                : lines.reduce(0) { $0 + $1.confidence } / Double(lines.count)
+            cropCandidates.append(CropCandidate(
+                image: crop,
+                region: region,
+                metadata: ReturnInputOCRCandidate(
+                    id: index,
+                    source: region.source,
+                    recognizedText: recognizedText,
+                    submittedText: submittedText,
+                    recognizedLineCount: lines.count,
+                    averageConfidence: confidence
+                )
+            ))
+        }
+
+        guard let selectedMetadata = ReturnInputCaptureContract.selectOCRCandidate(
+            cropCandidates.map(\.metadata),
+            referenceText: referenceText
+        ),
+        let selected = cropCandidates.first(where: { $0.metadata.id == selectedMetadata.id }) else {
+            throw WindowContextCaptureError.noInputRegion(ReturnCaptureAttemptMetadata(
+                windowFrame: windowFrame,
+                visionRegions: visionRegions,
+                axRegions: axRegions,
+                selectedRegion: nil,
+                selectedSource: nil,
+                fullScreenOCRLineCount: fullScreenOCRLineCount,
+                recognizedLineCount: 0,
+                cropPixelWidth: 0,
+                cropPixelHeight: 0
+            ))
+        }
+        let bitmap = NSBitmapImageRep(cgImage: selected.image)
+        guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            throw WindowContextCaptureError.pngEncodingFailed(ReturnCaptureAttemptMetadata(
+                windowFrame: windowFrame,
+                visionRegions: visionRegions,
+                axRegions: axRegions,
+                selectedRegion: selected.region,
+                selectedSource: selectedMetadata.source,
+                fullScreenOCRLineCount: fullScreenOCRLineCount,
+                recognizedLineCount: selectedMetadata.recognizedLineCount,
+                cropPixelWidth: selected.image.width,
+                cropPixelHeight: selected.image.height
+            ))
+        }
+        return CapturedKeyMoment(
+            pngData: pngData,
+            recognizedText: selectedMetadata.recognizedText,
+            submittedTextCandidate: selectedMetadata.submittedText,
+            recognizedLineCount: selectedMetadata.recognizedLineCount,
+            fullScreenOCRLineCount: fullScreenOCRLineCount,
+            source: selectedMetadata.source,
+            cropPixelWidth: selected.image.width,
+            cropPixelHeight: selected.image.height,
+            windowTitle: windowTitle,
+            windowFrame: windowFrame,
+            visionRegions: visionRegions,
+            axRegions: axRegions,
+            selectedRegion: selected.region
+        )
     }
 
     private static func captureDisplay(_ display: SCDisplay) async throws -> CGImage {
@@ -347,6 +663,7 @@ enum WindowContextCapture {
 
     private struct CropCandidate {
         let image: CGImage
+        let region: ReturnInputCaptureRegion
         let metadata: ReturnInputOCRCandidate
     }
 
