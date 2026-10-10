@@ -1,5 +1,6 @@
 import SwiftUI
 import AgentOneModelRuntime
+import AgentOnePiRuntime
 
 struct AgentOneSettingsView: View {
     @ObservedObject var model: AgentOneShellViewModel
@@ -573,7 +574,7 @@ private struct ModelCredentialEditor: View {
     private func testConnection() async {
         guard !isTestingConnection else { return }
         isTestingConnection = true
-        statusMessage = "正在用一个最小请求验证模型连接…"
+        statusMessage = "正在验证实际聊天和历史查询工具…"
         statusIsError = false
         defer { isTestingConnection = false }
 
@@ -591,21 +592,33 @@ private struct ModelCredentialEditor: View {
         }
 
         do {
-            let result = try await OpenAICompatibleModelClient(configuration: .init(
-                baseURL: configuration.baseURL,
-                model: configuration.model,
-                providerName: "OpenAI-compatible"
-            )).infer(
-                ModelInferenceRequest(
-                    purpose: "user_initiated_connection_test",
-                    systemPrompt: "This is a connection test. Reply with only OK.",
-                    userPrompt: "OK",
-                    context: nil,
-                    allowsCloudProcessing: true
-                ),
-                apiKey: apiKey
+            let bridge = PiSidecarBridge()
+            defer { bridge.stopImmediately() }
+            try bridge.updateEnvironmentOverrides([
+                "AGENTONE_MODEL_ROUTE": "cloud",
+                "AGENTONE_MODEL_PROVIDER": "openai-compatible-completions",
+                "AGENTONE_MODEL_ID": configuration.model,
+                "AGENTONE_OPENAI_BASE_URL": configuration.baseURL.absoluteString,
+                "OPENAI_API_KEY": apiKey
+            ])
+            _ = try await bridge.health(timeout: 3)
+            let result = try await bridge.chat(
+                messages: [PiChatMessage(role: .user, content:
+                    "连接诊断：请调用 search_context，参数 summaryOnly=true，查询空的本地测试记录，然后只回复 OK。")],
+                sanitizedContext: nil,
+                recentMemory: [],
+                maxTokens: 12_000,
+                maxDurationMs: 30_000,
+                timeout: 35
             )
-            statusMessage = "连接成功：\(result.provider) · \(result.model)"
+            guard result.usage.toolCalls > 0,
+                  !result.usage.stoppedByBudget,
+                  let reply = result.spokenText, !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                statusMessage = "模型已连接，但未完成历史查询工具调用；实际 Agent 能力尚未通过验证。"
+                statusIsError = true
+                return
+            }
+            statusMessage = "聊天与历史查询工具验证成功：\(configuration.model)"
             statusIsError = false
         } catch {
             statusMessage = "连接失败：\(error.localizedDescription)"

@@ -689,59 +689,134 @@ struct SkillsLibraryView: View {
 private struct ReplayDayPicker: View {
     @ObservedObject var model: AgentOneShellViewModel
 
+    private var monthGroups: [ReplayMonthGroup] {
+        let grouped = Dictionary(grouping: model.replayDays) { option in
+            String(option.day.prefix(7))
+        }
+        return grouped.keys.sorted(by: >).map { month in
+            ReplayMonthGroup(
+                id: month,
+                label: Self.monthLabel(month),
+                days: grouped[month, default: []].sorted { $0.day > $1.day }
+            )
+        }
+    }
+
     var body: some View {
         if model.replayDays.isEmpty {
             EmptyView()
         } else {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(model.replayDays) { option in
-                        Button {
-                            model.selectReplayDay(option.day)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(option.label)
-                                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                                Text("\(option.contextCount) 段 Context · \(option.journalCount) 条内心")
-                                    .font(.system(size: 10, weight: .regular, design: .rounded))
-                                    .foregroundStyle(
-                                        model.selectedReplayDay == option.day
-                                            ? AgentOnePalette.textPrimary.opacity(0.76)
-                                            : AgentOnePalette.textTertiary
-                                    )
-                            }
-                            .foregroundStyle(
-                                model.selectedReplayDay == option.day
-                                    ? AgentOnePalette.textPrimary
-                                    : AgentOnePalette.textSecondary
-                            )
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 9)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(
-                                        model.selectedReplayDay == option.day
-                                            ? AgentOnePalette.violet.opacity(0.22)
-                                            : AgentOnePalette.surface2
-                                    )
-                            )
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .stroke(
-                                        model.selectedReplayDay == option.day
-                                            ? AgentOnePalette.violet.opacity(0.72)
-                                            : AgentOnePalette.separator,
-                                        lineWidth: 1
-                                    )
+            VStack(alignment: .leading, spacing: AgentOneMetric.spacingS) {
+                HStack(spacing: AgentOneMetric.spacingM) {
+                    Label(
+                        "全部保存 · \(model.totalRecordedDays) 个日期 · 最早 \(model.replayDays.last?.label ?? "未知")",
+                        systemImage: "archivebox.fill"
+                    )
+                    .font(AgentOneType.caption)
+                    .foregroundStyle(AgentOnePalette.textSecondary)
+
+                    Spacer()
+
+                    Menu {
+                        ForEach(monthGroups) { group in
+                            Menu(group.label) {
+                                ForEach(group.days) { option in
+                                    Button {
+                                        model.selectReplayDay(option.day)
+                                    } label: {
+                                        if model.selectedReplayDay == option.day {
+                                            Label(
+                                                Self.menuLabel(option),
+                                                systemImage: "checkmark"
+                                            )
+                                        } else {
+                                            Text(Self.menuLabel(option))
+                                        }
+                                    }
+                                }
                             }
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("查看 \(option.label) 的记录")
+                    } label: {
+                        Label("查看全部历史", systemImage: "calendar")
+                            .font(AgentOneType.caption)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .accessibilityLabel("查看全部历史日期")
+                }
+
+                Text("下方可左右滚动快速切换；全部历史可按月份展开。选择任意一天后，会显示当天保存的全部 Context 和 Agent 日记，不再截断。")
+                    .font(AgentOneType.caption)
+                    .foregroundStyle(AgentOnePalette.textTertiary)
+
+                ScrollView(.horizontal, showsIndicators: true) {
+                    HStack(spacing: 8) {
+                        ForEach(model.replayDays) { option in
+                            Button {
+                                model.selectReplayDay(option.day)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(option.label)
+                                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                    Text("\(option.contextCount) 段 Context · \(option.journalCount) 条内心")
+                                        .font(.system(size: 10, weight: .regular, design: .rounded))
+                                        .foregroundStyle(
+                                            model.selectedReplayDay == option.day
+                                                ? AgentOnePalette.textPrimary.opacity(0.76)
+                                                : AgentOnePalette.textTertiary
+                                        )
+                                }
+                                .foregroundStyle(
+                                    model.selectedReplayDay == option.day
+                                        ? AgentOnePalette.textPrimary
+                                        : AgentOnePalette.textSecondary
+                                )
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 9)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(
+                                            model.selectedReplayDay == option.day
+                                                ? AgentOnePalette.violet.opacity(0.22)
+                                                : AgentOnePalette.surface2
+                                        )
+                                )
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .stroke(
+                                            model.selectedReplayDay == option.day
+                                                ? AgentOnePalette.violet.opacity(0.72)
+                                                : AgentOnePalette.separator,
+                                            lineWidth: 1
+                                        )
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("查看 \(option.label) 的全部记录")
+                        }
                     }
                 }
             }
         }
     }
+
+    private static func menuLabel(_ option: ReplayDayOption) -> String {
+        "\(option.label) · \(option.contextCount) Context · \(option.journalCount) 日记"
+    }
+
+    private static func monthLabel(_ month: String) -> String {
+        let parts = month.split(separator: "-")
+        guard parts.count == 2,
+              let year = Int(parts[0]),
+              let number = Int(parts[1]) else { return month }
+        return "\(year) 年 \(number) 月"
+    }
+}
+
+private struct ReplayMonthGroup: Identifiable {
+    let id: String
+    let label: String
+    let days: [ReplayDayOption]
 }
 
 private struct SkillRow: View {

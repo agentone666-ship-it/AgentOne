@@ -213,23 +213,26 @@ public final class PiSidecarBridge {
         reason: String,
         sanitizedContext: PiSanitizedContext,
         recentMemory: [PiRecentMemory],
+        contextHistory: [PiContextRecord] = [],
         budget: PiWakeBudget,
         timeout: TimeInterval? = nil
     ) async throws -> PiResultPayload {
         // These checks intentionally happen before send(), because send() is
         // the point at which a missing process would be launched.
         guard sanitizedContext.isSafeForPi,
-              recentMemory.allSatisfy(Self.isSafeForPi) else {
+              recentMemory.allSatisfy(Self.isSafeForPi),
+              await Self.isSafeHistory(contextHistory) else {
             throw PiSidecarError.sensitiveContext
         }
         try Self.validate(budget: budget)
 
-        let payload = PiWakePayload(
+        var payload = PiWakePayload(
             reason: reason,
             sanitizedContext: sanitizedContext,
             recentMemory: recentMemory,
             budget: budget
         )
+        payload.contextHistory = contextHistory
         let response = try await send(.wake(payload: payload), timeout: timeout, startIfNeeded: true)
         guard case .result(_, let result) = response else {
             throw PiSidecarError.unexpectedResponse(response.type)
@@ -242,6 +245,7 @@ public final class PiSidecarBridge {
         messages: [PiChatMessage],
         sanitizedContext: PiSanitizedContext?,
         recentMemory: [PiRecentMemory],
+        contextHistory: [PiContextRecord] = [],
         maxTokens: Int = 2_400,
         maxDurationMs: Int = 30_000,
         timeout: TimeInterval? = nil
@@ -250,7 +254,8 @@ public final class PiSidecarBridge {
               messages.count <= 20,
               messages.allSatisfy({ !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }),
               sanitizedContext?.isSafeForPi != false,
-              recentMemory.allSatisfy(Self.isSafeForPi) else {
+              recentMemory.allSatisfy(Self.isSafeForPi),
+              await Self.isSafeHistory(contextHistory) else {
             throw PiSidecarError.sensitiveContext
         }
         guard (128...16_000).contains(maxTokens),
@@ -258,7 +263,7 @@ public final class PiSidecarBridge {
             throw PiSidecarError.invalidBudget("Chat budget is outside the supported range.")
         }
 
-        let payload = PiChatPayload(
+        var payload = PiChatPayload(
             purpose: purpose,
             messages: messages,
             sanitizedContext: sanitizedContext,
@@ -266,6 +271,7 @@ public final class PiSidecarBridge {
             maxTokens: maxTokens,
             maxDurationMs: maxDurationMs
         )
+        payload.contextHistory = contextHistory
         let response = try await send(.chat(payload: payload), timeout: timeout, startIfNeeded: true)
         guard case .result(_, let result) = response else {
             throw PiSidecarError.unexpectedResponse(response.type)
@@ -293,6 +299,12 @@ public final class PiSidecarBridge {
 
     public func stopImmediately() {
         cleanUpProcess(terminalError: nil, terminateIfRunning: true)
+    }
+
+    private static func isSafeHistory(_ records: [PiContextRecord]) async -> Bool {
+        await Task.detached(priority: .userInitiated) {
+            records.allSatisfy { $0.context.isSafeForPi }
+        }.value
     }
 
     private func send(

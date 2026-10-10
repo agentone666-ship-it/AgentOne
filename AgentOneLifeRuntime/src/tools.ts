@@ -1,6 +1,8 @@
+import { createContextSearchTool } from "./context-search.js";
 import { Type } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type {
+  ContextRecord,
   MemorySnippet,
   RuntimeAction,
   SafeToolName,
@@ -10,6 +12,8 @@ import type {
 
 export interface WakeToolState {
   context: SanitizedContext;
+  contextHistory?: ContextRecord[];
+  historyTimeZone?: string;
   memory: MemorySnippet[];
   budget: WakeBudget;
   actions: RuntimeAction[];
@@ -29,6 +33,7 @@ export function createSafeTools(state: WakeToolState): SafeAgentTool[] {
   };
 
   return [
+    createContextSearchTool(state.contextHistory, state.historyTimeZone) as SafeAgentTool,
     {
       name: "get_current_context",
       label: "Read current sanitized context",

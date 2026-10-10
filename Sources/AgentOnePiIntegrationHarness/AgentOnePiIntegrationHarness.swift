@@ -25,6 +25,25 @@ struct AgentOnePiIntegrationHarness {
         }
 
         do {
+            if let flag = CommandLine.arguments.firstIndex(of: "--context-history-summary") {
+                guard CommandLine.arguments.indices.contains(flag + 1) else { throw HarnessFailure("Provide a Diary directory") }
+                let home = URL(fileURLWithPath: CommandLine.arguments[flag + 1], isDirectory: true)
+                guard FileManager.default.fileExists(atPath: home.appendingPathComponent("Daily").path) else {
+                    throw HarnessFailure("Diary/Daily directory does not exist")
+                }
+                let diary = try AppendOnlyDiary(homeURL: home)
+                let records = PiContextHistory.records(from: await diary.allEntries())
+                let formatter = DateFormatter()
+                formatter.dateFormat = "yyyy-MM"
+                formatter.timeZone = .current
+                let iso = ISO8601DateFormatter()
+                let months = Dictionary(grouping: records) { record in
+                    iso.date(from: record.timestamp).map { formatter.string(from: $0) } ?? "invalid"
+                }
+                print("Searchable persisted activity: \(records.count)")
+                for month in months.keys.sorted() { print("\(month): \(months[month]!.count)") }
+                return
+            }
             let checks = try await runHarness()
             print("AgentOne Pi integration validation passed (\(checks.count) checks)\n")
             for (index, check) in checks.enumerated() {
@@ -150,11 +169,34 @@ struct AgentOnePiIntegrationHarness {
         ))
 
         checks.append(try await validateCorePolicyBridgePipeline(configuration: productionConfiguration))
+        checks.append(try await validateChatProcessIsolation())
         checks.append(try await validateRemoteErrorRecovery())
         checks.append(try await validateUnknownResponseIDAndPassiveEvents())
         checks.append(try await validateProtocolModelMetadata())
         checks.append(contentsOf: try await validateEnvironmentOverrides())
         return checks
+    }
+
+    @MainActor
+    private static func validateChatProcessIsolation() async throws -> HarnessCheck {
+        let background = PiSidecarBridge(configuration: fixtureConfiguration(mode: "metadata"))
+        let chat = PiSidecarBridge(configuration: fixtureConfiguration(mode: "delayed-chat"))
+        defer { background.stopImmediately(); chat.stopImmediately() }
+        _ = try await background.health()
+        _ = try await chat.health()
+        let pending = Task { @MainActor in
+            try await chat.chat(messages: [.init(role: .user, content: "test")],
+                sanitizedContext: nil, recentMemory: [], timeout: 5)
+        }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        background.stopImmediately()
+        _ = try await background.health()
+        background.stopImmediately()
+        let result = try await pending.value
+        try require(result.outcome == "fixture_result", "Background cancellation interrupted chat")
+        try require(chat.isRunning, "Chat process stopped with background process")
+        return HarnessCheck(name: "Interactive chat process isolation",
+            detail: "A delayed chat survives stopping, restarting and stopping the background sidecar.")
     }
 
     @MainActor
@@ -680,6 +722,7 @@ struct AgentOnePiIntegrationHarness {
                 ])
                 return
             default:
+                if mode == "delayed-chat" { Thread.sleep(forTimeInterval: 0.5) }
                 var payload: [String: Any] = [
                     "outcome": "fixture_result",
                     "actions": [],

@@ -37,7 +37,23 @@ extension AgentOneShellViewModel {
 
         hasLiveContext = true
         lastRuntimeUpdate = event.timestamp
-        if let replay { applyRuntimeReplay(replay) }
+        if let replay {
+            // Live capture keeps today's library projection fresh, but it must
+            // never pull the user out of a historical day they deliberately
+            // opened. Previously every new click/scroll/Return reapplied
+            // today's replay unconditionally, leaving the old date chip
+            // highlighted while the visible content had silently jumped back
+            // to today.
+            persistedReplaysByDay[replay.day] = replay
+            mergeSkillCards(from: replay)
+            rebuildReplayLibraryMetadata()
+            rebuildMemoryLibrary()
+            if selectedReplayDay == replay.day || !isBrowsingReplayHistory {
+                selectedReplayDay = replay.day
+                isBrowsingReplayHistory = replay.day != Self.dayKey(Date())
+                applyRuntimeReplay(replay)
+            }
+        }
         if let habits { consumeHabitContexts(habits) }
     }
 
@@ -168,13 +184,18 @@ extension AgentOneShellViewModel {
 
     private func applyRuntimeReplay(_ replay: SemanticReplay) {
         let evidenceByID = Dictionary(uniqueKeysWithValues: replay.evidence.map { ($0.id, $0) })
-        let mapped = replay.contextLogMoments.suffix(160).map {
+        // The diary is permanent, so its read model must be permanent too. The
+        // previous UI-only suffixes silently hid the beginning of busy days
+        // (Context after 160 rows and Agent thoughts after 80 rows) even though
+        // every immutable fact was still present on disk. SwiftUI renders the
+        // corresponding views lazily, so retaining the complete selected day
+        // here preserves history without eagerly constructing every row.
+        let mapped = replay.contextLogMoments.map {
             Self.makeReplayMoment(from: $0, evidenceByID: evidenceByID)
         }
         replayMoments = mapped
         dailyDigest = replay.latestDailyContextDigest.map(Self.makeDailyDigestCard)
         agentJournalEntries = replay.agentJournalMoments
-            .suffix(80)
             .reversed()
             .map { Self.makeAgentJournalCard(from: $0, evidenceByID: evidenceByID) }
         mergeSkillCards(from: replay)
@@ -196,7 +217,6 @@ extension AgentOneShellViewModel {
             guard !skills.contains(where: { $0.name == name }) else { continue }
             skills.append(Self.makeSkillCard(from: moment))
         }
-        skills = Array(skills.suffix(40))
     }
 
     private static func makeSkillCard(from skill: AgentSkill) -> AgentSkillCard {
