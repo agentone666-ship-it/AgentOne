@@ -22,11 +22,15 @@ public final class AudioTrackWriter: @unchecked Sendable {
     private var format: AVAudioFormat?
     private var mapping = "host_clock"
     private var offset: Double = 0
+    private var activity = AudioActivitySummary()
+    private var segmentContext = "{}"
+    private let onActivity: @Sendable (AudioActivityReading?) -> Void
     public private(set) var sealedCount = 0
 
     public init(database: MemoryDatabase, source: String, sessionID: String, wallAnchor: Date, hostAnchor: Double,
-                segmentSeconds: Double = 60, metadata: @escaping @Sendable () -> (String?, String) = { (nil, "{}") }) {
+                segmentSeconds: Double = 60, onActivity: @escaping @Sendable (AudioActivityReading?) -> Void = { _ in }, metadata: @escaping @Sendable () -> (String?, String) = { (nil, "{}") }) {
         self.database = database; self.source = source; self.sessionID = sessionID
+        self.onActivity = onActivity
         self.wallAnchor = wallAnchor; self.hostAnchor = hostAnchor; self.segmentSeconds = segmentSeconds; self.metadata = metadata
     }
 
@@ -78,12 +82,17 @@ public final class AudioTrackWriter: @unchecked Sendable {
             file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: buffer.format.commonFormat, interleaved: buffer.format.isInterleaved)
             self.url = url
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            activity = AudioActivitySummary()
             let (place, context) = metadata()
+            segmentContext = context
             try database.execute("INSERT INTO segments VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [id,sessionID,source,
                 MemoryDatabase.ms(date(for: pts)),MemoryDatabase.ms(date(for: pts)),TimeZone.current.identifier,
                 String(pts),String(hostAnchor),mapping,String(buffer.format.sampleRate),String(buffer.format.channelCount),relative,nil,
                 "recording",place,context,MemoryDatabase.now])
         }
+        let reading = AudioActivityReading.measure(buffer)
+        activity.observe(reading)
+        onActivity(reading)
         try file?.write(from: buffer)
         endPTS = max(endPTS, pts + duration)
     }
@@ -95,9 +104,12 @@ public final class AudioTrackWriter: @unchecked Sendable {
         try FileManager.default.moveItem(at: url, to: finalURL)
         let hash = SHA256.hash(data: try Data(contentsOf: finalURL)).map { String(format: "%02x", $0) }.joined()
         let relative = String(finalURL.path.dropFirst(database.root.path.count + 1))
+        var context = (segmentContext.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? [:]
+        context["audio_activity"] = activity.json
+        let contextJSON = String(decoding: try JSONSerialization.data(withJSONObject: context),as: UTF8.self)
         try database.transaction {
-            try database.execute("UPDATE segments SET ended_ms=?,relative_path=?,sha256=?,state='sealed' WHERE id=?",
-                [MemoryDatabase.ms(date(for: endPTS)),relative,hash,id])
+            try database.execute("UPDATE segments SET ended_ms=?,relative_path=?,sha256=?,context_json=?,state='sealed' WHERE id=?",
+                [MemoryDatabase.ms(date(for: endPTS)),relative,hash,contextJSON,id])
             try database.execute("INSERT OR IGNORE INTO jobs (id,segment_id,stage,source_hash,state,created_ms,updated_ms) VALUES (?,?,'transcribe',?,'pending',?,?)",
                 [UUID().uuidString,id,hash,MemoryDatabase.now,MemoryDatabase.now])
         }

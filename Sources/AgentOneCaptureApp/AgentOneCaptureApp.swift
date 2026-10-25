@@ -15,9 +15,15 @@ import SwiftUI
     @Published var recording = false
     @Published var busy = false
     @Published var hasError = false
-    @Published var message = "点击开启后，才会请求系统音与麦克风权限"
+    @Published var message = "自动记录会在系统授权后开始；声音、安静片段都会保留"
+    @Published var automaticRecording = (UserDefaults.standard.object(forKey: "vNext.automaticRecording") as? Bool) ?? true
+    @Published var systemReceiving = false
+    @Published var microphoneReceiving = false
+    @Published var systemHasSound = false
+    @Published var microphoneHasSound = false
+    @Published var loginStatus = ""
     @Published var place = UserDefaults.standard.string(forKey: "vNext.place") ?? ""
-    @Published var autoResume = UserDefaults.standard.bool(forKey: "vNext.autoResume")
+    @Published var autoResume = (UserDefaults.standard.object(forKey: "vNext.autoResume") as? Bool) ?? true
     @Published var pauseOnLock = (UserDefaults.standard.object(forKey: "vNext.pauseOnLock") as? Bool) ?? true
     @Published var query = ""
     @Published var rows: [[String: String]] = []
@@ -45,9 +51,9 @@ import SwiftUI
         if db == nil { message = "Memory 目录无法打开；录音不会启动。" }
         service?.onFailure = { [weak self] message in
             guard let self else { return }
-            self.desiredRecording = false
             self.hasError = true
-            UserDefaults.standard.set(false,forKey: "vNext.captureDesired")
+            // Keep automatic intent for the next launch; do not loop on disk/device failures.
+            if !self.automaticRecording { self.desiredRecording = false; UserDefaults.standard.set(false,forKey: "vNext.captureDesired") }
             Task { await self.stop(reason: "stream_error"); self.message = message }
         }
         worker?.enabled = localASR
@@ -78,9 +84,16 @@ import SwiftUI
                 do { try await Task.sleep(for: .seconds(3)) } catch { return }
             }
         }
-        if autoResume && UserDefaults.standard.bool(forKey: "vNext.captureConsent") && UserDefaults.standard.bool(forKey: "vNext.captureDesired") {
+        if autoResume { setAutoResume(true) }
+        switch AutomaticCapturePolicy.startup(enabled: automaticRecording,
+                desired: UserDefaults.standard.object(forKey: "vNext.captureDesired") as? Bool,
+                setupAttempted: UserDefaults.standard.bool(forKey: "vNext.permissionSetupAttempted"), demo: demo) {
+        case .start(let prompts):
             desiredRecording = true
-            Task { await start(prompts: false) }
+            if prompts { UserDefaults.standard.set(true,forKey: "vNext.permissionSetupAttempted") }
+            Task { await start(prompts: prompts) }
+        case .paused: message = "自动记录已手动暂停；点击恢复后继续"
+        case .inactive: message = "自动记录已关闭；可以手动开始"
         }
         refresh()
     }
@@ -88,7 +101,11 @@ import SwiftUI
     func toggleRecording() {
         guard !demo, !busy else { return }
         if recording { pauseRecording() }
-        else { desiredRecording = true; Task { await start(prompts: true) } }
+        else {
+            desiredRecording = true
+            UserDefaults.standard.set(true,forKey: "vNext.permissionSetupAttempted")
+            Task { await start(prompts: true) }
+        }
     }
 
     func pauseRecording() {
@@ -109,15 +126,23 @@ import SwiftUI
             hasError = false
             UserDefaults.standard.set(true, forKey: "vNext.captureConsent")
             UserDefaults.standard.set(true, forKey: "vNext.captureDesired")
-            message = "两路分别保存 · 原音访问需单独开启"
-        } catch { hasError = true; desiredRecording = false; UserDefaults.standard.set(false,forKey: "vNext.captureDesired"); recording = false; message = error.localizedDescription }
+            message = automaticRecording ? "自动连续保存两路原音，不因安静而丢弃；可随时暂停" : "两路分别保存 · 原音访问需单独开启"
+        } catch {
+            hasError = true
+            if !automaticRecording { desiredRecording = false; UserDefaults.standard.set(false,forKey: "vNext.captureDesired") }
+            recording = false
+            message = "自动记录尚未开始：" + error.localizedDescription
+            expanded = true; pinned = true
+        }
     }
 
     func stop(reason: String) async {
         do { try await service?.stop(reason: reason) }
         catch { message = "录音已停止，但末段封口失败；原文件保留为待恢复" }
         recording = false
-        if reason == "user_paused" { message = "已暂停。已封口的音频与待处理任务仍保留。" }
+        systemHasSound = false; microphoneHasSound = false
+        systemReceiving = false; microphoneReceiving = false
+        if reason == "user_paused" { message = "已手动暂停，不会自行恢复。点击恢复自动记录即可继续。" }
         else if reason == "sleep" || reason == "screen_locked" { message = "设备休眠或锁屏，已暂停" }
         refresh()
     }
@@ -141,16 +166,34 @@ import SwiftUI
         service?.metadata.update(place: place, application: app?.localizedName, bundleID: app?.bundleIdentifier)
     }
 
+    func setAutomaticRecording(_ value: Bool) {
+        guard !demo else { return }
+        automaticRecording = value
+        UserDefaults.standard.set(value,forKey: "vNext.automaticRecording")
+        if value {
+            desiredRecording = true
+            UserDefaults.standard.set(true,forKey: "vNext.captureDesired")
+            UserDefaults.standard.set(true,forKey: "vNext.permissionSetupAttempted")
+            Task { await start(prompts: true) }
+        } else { pauseRecording() }
+    }
+
+    func openLoginSettings() { SMAppService.openSystemSettingsLoginItems() }
+
     func setAutoResume(_ value: Bool) {
         autoResume = value
         UserDefaults.standard.set(value, forKey: "vNext.autoResume")
-        // Login launch is an explicit user action. SwiftPM binaries cannot
-        // register as login apps; the signed .app supplies that lifecycle.
+        // Registration is separate from system approval; report the actual status.
         do {
-            if value { try SMAppService.mainApp.register() }
-            else if SMAppService.mainApp.status != .notRegistered { try SMAppService.mainApp.unregister() }
-            if value && SMAppService.mainApp.status == .requiresApproval { message = "请在系统设置的登录项目中允许 AgentOne，自动续录设置才会生效。" }
-        } catch { message = "自动续录偏好已保存；登录启动需在系统设置中确认或使用打包的 App。" }
+            if value && SMAppService.mainApp.status == .notRegistered { try SMAppService.mainApp.register() }
+            else if !value && SMAppService.mainApp.status != .notRegistered { try SMAppService.mainApp.unregister() }
+            switch SMAppService.mainApp.status {
+            case .enabled: loginStatus = "已允许登录时启动"
+            case .requiresApproval: loginStatus = "等待在系统设置中允许登录启动"
+            case .notRegistered: loginStatus = "未注册登录启动"
+            default: loginStatus = "登录启动不可用"
+            }
+        } catch { loginStatus = "登录启动注册失败，请检查系统设置" }
     }
 
     func enableASR() {
@@ -173,6 +216,10 @@ import SwiftUI
     func refresh() {
         guard let database, !demo else { return }
         updateMetadata()
+        systemReceiving = recording && (service?.activity.hasSamples(source: "system_audio") ?? false)
+        microphoneReceiving = recording && (service?.activity.hasSamples(source: "microphone") ?? false)
+        systemHasSound = recording && (service?.activity.hasSound(source: "system_audio") ?? false)
+        microphoneHasSound = recording && (service?.activity.hasSound(source: "microphone") ?? false)
         do {
             pending = Int(try database.rows("SELECT COUNT(*) AS count FROM jobs WHERE state IN ('pending','leased')").first?["count"] ?? "0") ?? 0
             let sql = """

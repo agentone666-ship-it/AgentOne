@@ -66,9 +66,9 @@ cat > "$contents_dir/Info.plist" <<'PLIST'
     <key>LSUIElement</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>AgentOne records a separate microphone track only after you enable daily audio memory. You can pause it from the island.</string>
+    <string>AgentOne automatically records a separate microphone track for your personal audio memory after you grant permission. You can pause automatic recording from the island.</string>
     <key>NSAudioCaptureUsageDescription</key>
-    <string>AgentOne records system audio as local memory only after you enable recording.</string>
+    <string>AgentOne automatically records system audio as local memory after you grant permission. You can pause automatic recording at any time.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>AgentOne uses on-device speech recognition only when you enable local transcription. Unsupported on-device recognition remains queued.</string>
     <key>NSScreenCaptureDescription</key>

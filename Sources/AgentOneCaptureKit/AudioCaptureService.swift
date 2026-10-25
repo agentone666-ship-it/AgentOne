@@ -21,18 +21,23 @@ public final class CaptureMetadata: @unchecked Sendable {
 
 private extension String { var nilIfEmpty: String? { isEmpty ? nil : self } }
 
+private struct OwnedAudioPacket: @unchecked Sendable {
+    let buffer: AVAudioPCMBuffer
+    let presentationSeconds: Double
+}
+
 private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     let queue = DispatchQueue(label: "life.agentone.audio-writer", qos: .utility)
     let system: AudioTrackWriter
     let microphone: AudioTrackWriter
     let onFailure: @Sendable (String) -> Void
     private var failed = false
-    init(database: MemoryDatabase, metadata: CaptureMetadata, onFailure: @escaping @Sendable (String) -> Void) {
+    init(database: MemoryDatabase, metadata: CaptureMetadata, activity: CaptureActivityMeter, onFailure: @escaping @Sendable (String) -> Void) {
         let sessionID = UUID().uuidString
         let host = CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()))
         let wall = Date()
-        system = AudioTrackWriter(database: database, source: "system_audio", sessionID: sessionID, wallAnchor: wall, hostAnchor: host, metadata: { metadata.snapshot() })
-        microphone = AudioTrackWriter(database: database, source: "microphone", sessionID: sessionID, wallAnchor: wall, hostAnchor: host, metadata: { metadata.snapshot() })
+        system = AudioTrackWriter(database: database, source: "system_audio", sessionID: sessionID, wallAnchor: wall, hostAnchor: host, onActivity: { activity.observe($0,source: "system_audio") }, metadata: { metadata.snapshot() })
+        microphone = AudioTrackWriter(database: database, source: "microphone", sessionID: sessionID, wallAnchor: wall, hostAnchor: host, onActivity: { activity.observe($0,source: "microphone") }, metadata: { metadata.snapshot() })
         self.onFailure = onFailure
     }
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
@@ -41,6 +46,15 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             if type == .audio { try system.consume(sampleBuffer) }
             else if #available(macOS 15, *), type == .microphone { try microphone.consume(sampleBuffer) }
         } catch { failed = true; onFailure("音频保存失败，录音已停止。请检查磁盘空间和 Memory 路径。") }
+    }
+    func enqueueMicrophone(_ buffer: AVAudioPCMBuffer, presentationSeconds: Double) {
+        // AVFoundation buffers are owned copies; all writer access stays on this queue.
+        let packet = OwnedAudioPacket(buffer: buffer,presentationSeconds: presentationSeconds)
+        queue.async {
+            guard !self.failed else { return }
+            do { try self.microphone.append(packet.buffer,presentationSeconds: packet.presentationSeconds) }
+            catch { self.failed = true; self.onFailure("麦克风保存失败，录音已停止。请检查磁盘空间。") }
+        }
     }
     func stream(_ stream: SCStream, didStopWithError error: Error) { onFailure("系统音频流已中断，请检查设备或系统授权后继续。") }
     func finish() async throws {
@@ -58,9 +72,11 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
 @MainActor public final class AudioCaptureService {
     public private(set) var isRecording = false
     public let metadata = CaptureMetadata()
+    public let activity = CaptureActivityMeter()
     private let database: MemoryDatabase
     private var stream: SCStream?
     private var sink: AudioStreamSink?
+    private var microphoneInput: MicrophoneInput?
     private var lockFD: Int32 = -1
     private var stoppingTask: Task<Void, Error>?
     public var onFailure: (@MainActor @Sendable (String) -> Void)?
@@ -88,26 +104,33 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
             guard let display = content.displays.first else { throw CaptureFailure.message("没有可用显示器，无法启动系统音采集") }
             try database.recoverInterruptedSegments()
-            let output = AudioStreamSink(database: database, metadata: metadata) { [weak self] message in
+            let output = AudioStreamSink(database: database, metadata: metadata, activity: activity) { [weak self] message in
                 Task { @MainActor in self?.onFailure?(message) }
             }
             let configuration = SCStreamConfiguration()
             configuration.width = 2; configuration.height = 2
             configuration.minimumFrameInterval = CMTime(seconds: 1, preferredTimescale: 1)
             configuration.showsCursor = false
-            configuration.capturesAudio = true; configuration.captureMicrophone = true
+            configuration.capturesAudio = true; configuration.captureMicrophone = false
             configuration.excludesCurrentProcessAudio = true
             configuration.sampleRate = 48_000; configuration.channelCount = 2
             let capture = SCStream(filter: SCContentFilter(display: display, excludingApplications: [], exceptingWindows: []), configuration: configuration, delegate: output)
             try capture.addStreamOutput(output, type: .audio, sampleHandlerQueue: output.queue)
-            try capture.addStreamOutput(output, type: .microphone, sampleHandlerQueue: output.queue)
+            // Consume/discard tiny screen frames to avoid SCStream output errors; never save them.
+            try capture.addStreamOutput(output, type: .screen, sampleHandlerQueue: output.queue)
             sink = output; stream = capture
             try await capture.startCapture()
+            let microphone = MicrophoneInput(deliver: { buffer,pts in output.enqueueMicrophone(buffer,presentationSeconds: pts) },fail: { [weak self] message in
+                Task { @MainActor in self?.onFailure?(message) }
+            })
+            microphoneInput = microphone
+            try microphone.start()
             try database.execute("UPDATE coverage SET ended_ms=? WHERE ended_ms IS NULL", [MemoryDatabase.now])
             isRecording = true
             try database.setCaptureState("recording", detail: "system_audio+microphone")
         } catch {
             isRecording = false
+            microphoneInput?.stop(); microphoneInput = nil
             if let stream { try? await stream.stopCapture() }
             if let sink { try? await sink.finish() }
             stream = nil; sink = nil; releaseLock()
@@ -126,6 +149,8 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
 
     private func performStop(reason: String) async throws {
         let wasRecording = isRecording
+        activity.reset()
+        microphoneInput?.stop(); microphoneInput = nil
         isRecording = false
         if let stream { try? await stream.stopCapture() }
         let output = sink

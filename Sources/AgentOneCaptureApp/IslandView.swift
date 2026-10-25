@@ -8,7 +8,7 @@ struct IslandView: View {
     var onExpand: (() -> Void)? = nil
     @State private var tab = IslandTab.capture
     private let accent = Color(red: 0.55,green: 0.9,blue: 0.84)
-    private var status: String { model.demo ? "界面演示" : model.hasError ? "需要留意" : model.recording ? "正在记录" : "未录音" }
+    private var status: String { model.demo ? "界面演示" : model.hasError ? "需要留意" : model.recording ? (model.automaticRecording ? "自动记录中" : "记录中") : "未录音" }
     private var tint: Color { model.hasError ? .orange : model.recording ? accent : .white.opacity(0.45) }
     private var notched: Bool { model.notchHeight > 0 }
     private var shape: UnevenRoundedRectangle {
@@ -96,21 +96,21 @@ struct IslandView: View {
         VStack(alignment: .leading,spacing: 16) {
             HStack {
                 VStack(alignment: .leading,spacing: 6) {
-                    Text(model.recording ? "正在保留今天的声音" : "让记忆从这里开始").font(.system(size: 22,weight: .semibold))
+                    Text(model.recording ? "正在保留今天的声音" : model.hasError ? "自动记录需要处理" : "让记忆从这里开始").font(.system(size: 22,weight: .semibold))
                     Text("声音、时间、地点，留给未来的你。").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
                 }
                 Spacer()
             }
             HStack(spacing: 10) {
-                sourceCard("系统声音",icon: "speaker.wave.2",subtitle: "电脑播放的声音")
-                sourceCard("麦克风",icon: "mic",subtitle: "身边的对话与声音")
+                sourceCard("系统声音",icon: "speaker.wave.2",subtitle: "电脑播放的声音",detected: model.systemHasSound,receiving: model.systemReceiving)
+                sourceCard("麦克风",icon: "mic",subtitle: "身边的对话与声音",detected: model.microphoneHasSound,receiving: model.microphoneReceiving)
             }
             HStack {
                 Label("地点",systemImage: "mappin.and.ellipse").foregroundStyle(.white.opacity(0.4))
                 TextField("添加地点，例如：工位",text: $model.place).textFieldStyle(.plain).onChange(of: model.place) { _,_ in model.updateMetadata() }
             }.font(.system(size: 11)).padding(11).background(.white.opacity(0.045),in: RoundedRectangle(cornerRadius: 10))
             Button { model.toggleRecording() } label: {
-                HStack(spacing: 8) { Image(systemName: model.recording ? "pause.fill" : "record.circle"); Text(model.busy ? "正在启动…" : model.recording ? "暂停记录" : "开启录音") }
+                HStack(spacing: 8) { Image(systemName: model.recording ? "pause.fill" : "record.circle"); Text(model.busy ? "正在启动…" : model.recording ? "暂停记录" : model.automaticRecording ? "恢复自动记录" : "开启录音") }
                     .font(.system(size: 13,weight: .semibold)).foregroundStyle(.black).frame(maxWidth: .infinity).padding(.vertical,12)
                     .background(accent,in: Capsule())
             }.buttonStyle(.plain).disabled(model.busy || model.demo)
@@ -118,9 +118,9 @@ struct IslandView: View {
             Spacer(minLength: 0)
         }
     }
-    private func sourceCard(_ title: String,icon: String,subtitle: String) -> some View {
+    private func sourceCard(_ title: String,icon: String,subtitle: String,detected: Bool,receiving: Bool) -> some View {
         VStack(alignment: .leading,spacing: 8) {
-            HStack { Image(systemName: icon).font(.system(size: 17)).foregroundStyle(model.recording ? accent : .white.opacity(0.65)); Spacer(); Text(model.recording ? "记录中" : "待开启").font(.system(size: 9)).foregroundStyle(.white.opacity(0.35)) }
+            HStack { Image(systemName: icon).font(.system(size: 17)).foregroundStyle(model.recording ? accent : .white.opacity(0.65)); Spacer(); Text(model.recording ? (!receiving ? "等待输入" : detected ? "检测到声音" : "安静 · 持续保存") : "待授权 / 暂停").font(.system(size: 9)).foregroundStyle(.white.opacity(0.35)) }
             Text(title).font(.system(size: 12,weight: .medium))
             Text(subtitle).font(.system(size: 10)).foregroundStyle(.white.opacity(0.35))
         }.frame(maxWidth: .infinity,alignment: .leading).padding(14).background(.white.opacity(0.055),in: RoundedRectangle(cornerRadius: 16))
@@ -163,7 +163,14 @@ struct IslandView: View {
             VStack(alignment: .leading,spacing: 16) {
                 Text("记录偏好").font(.system(size: 17,weight: .semibold))
                 VStack(alignment: .leading,spacing: 14) {
-                    Toggle("下次登录自动续录",isOn: Binding(get: {model.autoResume},set: {model.setAutoResume($0)}))
+                    Toggle("自动记录声音",isOn: Binding(get: {model.automaticRecording},set: {model.setAutomaticRecording($0)}))
+                    Text("授权后自动连续记录并检测声音；不丢弃安静片段。手动暂停后保持暂停。").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
+                    Toggle("登录后自动启动",isOn: Binding(get: {model.autoResume},set: {model.setAutoResume($0)}))
+                    HStack {
+                        Text(model.loginStatus).font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
+                        Spacer()
+                        if model.autoResume { Button("系统设置") { model.openLoginSettings() }.font(.system(size: 10)) }
+                    }
                     Toggle("锁屏时暂停",isOn: $model.pauseOnLock).onChange(of: model.pauseOnLock) { _,value in UserDefaults.standard.set(value,forKey: "vNext.pauseOnLock") }
                     Text("关闭锁屏暂停后，将尽量持续记录；休眠时仍会暂停。").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
                     Divider().overlay(.white.opacity(0.08))
