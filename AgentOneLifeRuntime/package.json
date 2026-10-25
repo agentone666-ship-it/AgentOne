@@ -16,7 +16,7 @@
     "@earendil-works/pi-ai": "0.75.5"
   },
   "devDependencies": {
-    "@types/node": "24.12.4",
-    "typescript": "5.9.3"
+    "@types/node": "26.6.5",
+    "typescript": "7.0.2"
   }
 }
