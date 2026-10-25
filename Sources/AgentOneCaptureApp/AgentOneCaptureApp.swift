@@ -8,7 +8,10 @@ import SwiftUI
 
 @MainActor final class CaptureModel: ObservableObject {
     static let shared = CaptureModel()
-    @Published var expanded = !UserDefaults.standard.bool(forKey: "vNext.captureConsent") || ProcessInfo.processInfo.environment["AGENTONE_CAPTURE_DEMO"] == "1"
+    @Published var expanded = ProcessInfo.processInfo.environment["AGENTONE_CAPTURE_DEMO"] == "1"
+    @Published var pinned = false
+    @Published var notchHeight: CGFloat = 0
+    @Published var notchWidth: CGFloat = 0
     @Published var recording = false
     @Published var busy = false
     @Published var hasError = false
@@ -204,99 +207,36 @@ import SwiftUI
     }
 }
 
-private struct IslandView: View {
-    @ObservedObject var model: CaptureModel
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Button { model.expanded.toggle() } label: {
-                HStack {
-                    Image(systemName: "waveform.circle.fill").foregroundStyle(.indigo)
-                    Text("AgentOne").fontWeight(.medium)
-                    Spacer()
-                    Circle().fill(model.hasError ? Color.orange : (model.recording ? Color.green : Color.secondary)).frame(width: 5,height: 5)
-                    Text(model.demo ? "界面演示" : (model.hasError ? "录音异常" : (model.recording ? "双路录制中" : "未录音"))).font(.caption)
-                    Image(systemName: model.expanded ? "chevron.up" : "chevron.down").font(.caption2)
-                }.contentShape(Rectangle())
-            }.buttonStyle(.plain)
-            if model.expanded {
-                HStack {
-                    Text("系统声音 ＋ 麦克风 · 独立轨道").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button(model.busy ? "正在启动…" : (model.recording ? "暂停" : "开启录音")) { model.toggleRecording() }.disabled(model.busy || model.demo)
-                }
-                Text(model.message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false,vertical: true)
-                HStack {
-                    Text("地点").font(.caption).foregroundStyle(.secondary)
-                    TextField("未标注",text: $model.place).textFieldStyle(.roundedBorder).onChange(of: model.place) { _,_ in model.updateMetadata() }
-                    Text("你标注").font(.caption2).foregroundStyle(.secondary)
-                }
-                Toggle("下次登录自动续录",isOn: Binding(get: {model.autoResume},set: {model.setAutoResume($0)})).font(.caption).disabled(model.demo)
-                Toggle("锁屏时暂停（可关闭以尽量全录）",isOn: $model.pauseOnLock).font(.caption).disabled(model.demo).onChange(of: model.pauseOnLock) { _,value in UserDefaults.standard.set(value,forKey: "vNext.pauseOnLock") }
-                Toggle("允许 MCP 读取原音（宿主可能使用云模型）",isOn: Binding(get: {model.audioExport},set: {model.setAudioExport($0)})).font(.caption2).disabled(model.demo)
-                HStack {
-                    Text(model.asrStatus).font(.caption2).foregroundStyle(.secondary)
-                    Spacer()
-                    if !model.localASR { Button("启用本机转写") { model.enableASR() }.font(.caption).disabled(model.demo) }
-                }
-                Divider()
-                HStack { Text("回忆").fontWeight(.medium); Spacer(); Text("\(model.pending) 项待处理").font(.caption).foregroundStyle(.secondary) }
-                TextField("搜索原话、主题或地点",text: $model.query).textFieldStyle(.roundedBorder).onChange(of: model.query) { _,_ in model.refresh() }
-                ScrollView {
-                    VStack(alignment: .leading,spacing: 12) {
-                        if model.rows.isEmpty { Text("录音片段封口后显示在这里。转写和标签尚未完成时，原音仍可保留。") .font(.caption).foregroundStyle(.secondary).padding(.vertical,18) }
-                        ForEach(model.rows, id: \.["id"]) { row in
-                            VStack(alignment: .leading,spacing: 5) {
-                                HStack {
-                                    Text(time(row["started_ms"])).font(.caption).monospacedDigit()
-                                    Text(row["source"] == "microphone" ? "麦克风" : "系统音").font(.caption2).foregroundStyle(.secondary)
-                                    if let place = row["place"] { Text(place).font(.caption2).foregroundStyle(.secondary) }
-                                    Spacer()
-                                    if row["state"] == "sealed" { Button("原音") { model.openAudio(row) }.font(.caption) }
-                                }
-                                Text(row["text"].flatMap {$0.isEmpty ? nil : $0} ?? (row["state"] == "incomplete" ? "末段不完整，保留待恢复" : "待转写")).font(.caption).lineLimit(3)
-                                if let payload = row["payload_json"],let data = payload.data(using: .utf8),let value = try? JSONSerialization.jsonObject(with: data) as? [String:Any],let tags = value["tags"] as? [String] {
-                                    Text(tags.joined(separator: " · ")).font(.caption2).foregroundStyle(.secondary)
-                                }
-                            }.padding(10).frame(maxWidth: .infinity,alignment: .leading).background(.white.opacity(0.06),in: RoundedRectangle(cornerRadius: 10))
-                        }
-                    }
-                }.frame(maxHeight: .infinity)
-                HStack {
-                    Button("打开 Memory") { if let root=model.database?.root { NSWorkspace.shared.open(root) } }.font(.caption)
-                    Spacer()
-                    Button("删除最近片段",role: .destructive) { model.deleteRecent() }.font(.caption).disabled(model.rows.isEmpty)
-                }
-                Text("MCP 提供资料与分析队列；待办执行交给你的 Agent。") .font(.caption2).foregroundStyle(.secondary)
-            }
-        }.padding(model.expanded ? 18 : 12).frame(width: model.expanded ? 420 : 240,height: model.expanded ? 560 : 42)
-            .background(Color(red: 0.035,green: 0.04,blue: 0.055),in: RoundedRectangle(cornerRadius: model.expanded ? 26 : 20))
-            .preferredColorScheme(.dark)
-    }
-    private func time(_ value: String?) -> String {
-        guard let value,let ms = Double(value) else { return "未知时间" }
-        let formatter = DateFormatter(); formatter.dateFormat = "MM-dd HH:mm:ss"
-        return formatter.string(from: Date(timeIntervalSince1970: ms / 1000))
-    }
-}
-
 @MainActor final class CaptureAppDelegate: NSObject, NSApplicationDelegate {
     private var island: IslandWindowController?
     private var subscription: AnyCancellable?
+    private var pinSubscription: AnyCancellable?
     private var screenObserver: NSObjectProtocol?
     private var stopping = false
     private var readyToExit = false
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         let model = CaptureModel.shared
-        let island = IslandWindowController(content: AnyView(IslandView(model: model)))
+        let island = IslandWindowController(content: AnyView(IslandView(model: model,onExpand: { [weak self] in self?.expandIsland() })))
         self.island = island
+        island.onGeometryChanged = { [weak model] geometry in
+            guard let model else { return }
+            if model.notchHeight != geometry.notchHeight { model.notchHeight = geometry.notchHeight }
+            if model.notchWidth != geometry.notchWidth { model.notchWidth = geometry.notchWidth }
+        }
+        island.onExpansionRequested = { [weak model] expanded in model?.expanded = expanded }
+        pinSubscription = model.$pinned.sink { [weak island] in island?.pinned = $0 }
         subscription = model.$expanded.removeDuplicates().sink { [weak self] expanded in
-            Task { @MainActor in self?.island?.position(expanded: expanded) }
+            Task { @MainActor in
+                guard let island = self?.island, island.expanded != expanded else { return }
+                island.position(expanded: expanded,animated: true)
+            }
         }
         screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,object: nil,queue: .main) { [weak self] _ in
             Task { @MainActor in self?.island?.position(expanded: CaptureModel.shared.expanded) }
         }
         island.show(expanded: model.expanded)
+        if !model.demo { island.startHoverMonitoring() }
         model.launch()
         if model.demo,let path = ProcessInfo.processInfo.environment["AGENTONE_CAPTURE_PREVIEW_PATH"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
@@ -317,6 +257,7 @@ private struct IslandView: View {
         if stopping { return .terminateCancel }
         stopping = true
         Task { @MainActor in
+            self.island?.stopHoverMonitoring()
             await CaptureModel.shared.prepareForExit()
             self.readyToExit = true
             sender.terminate(nil)
