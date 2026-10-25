@@ -23,6 +23,7 @@ public enum PiResponseType: String, Codable, Sendable {
 /// a model or remote payload can smuggle into a request.
 public enum PiAllowedTool: String, Codable, CaseIterable, Sendable {
     case getCurrentContext = "get_current_context"
+    case searchContext = "search_context"
     case searchMemory = "search_memory"
     case readRecentDiary = "read_recent_diary"
     case appendInnerJournal = "append_inner_journal"
@@ -133,7 +134,7 @@ public struct PiSanitizedContext: Codable, Equatable, Sendable {
             .joined(separator: " ")
     }
 
-    private static func containsProtectedMaterial(in text: String) -> Bool {
+    private static let protectedPatterns: [NSRegularExpression] = {
         let patterns = [
             #"(?i)\b(?:sk|pk|rk|ak)[-_][A-Za-z0-9_-]{16,}\b"#,
             #"(?i)\bAIza[0-9A-Za-z_-]{20,}\b"#,
@@ -144,9 +145,12 @@ public struct PiSanitizedContext: Codable, Equatable, Sendable {
             #"(?i)(?:验证码|one[ -]?time code|\botp\b)\D{0,12}\d{4,8}\b"#,
             #"\b[0-9a-fA-F]{32,}\b"#
         ]
-        return patterns.contains {
-            text.range(of: $0, options: .regularExpression) != nil
-        }
+        return patterns.map { try! NSRegularExpression(pattern: $0) }
+    }()
+
+    private static func containsProtectedMaterial(in text: String) -> Bool {
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return protectedPatterns.contains { $0.firstMatch(in: text, range: range) != nil }
     }
 }
 
@@ -198,6 +202,8 @@ public struct PiWakePayload: Codable, Equatable, Sendable {
     public var reason: String
     public var sanitizedContext: PiSanitizedContext
     public var recentMemory: [PiRecentMemory]
+    public var contextHistory: [PiContextRecord] = []
+    public var historyTimeZone: String = TimeZone.current.identifier
     public var budget: PiWakeBudget
 
     public init(reason: String, sanitizedContext: PiSanitizedContext, recentMemory: [PiRecentMemory], budget: PiWakeBudget) {
@@ -234,6 +240,8 @@ public struct PiChatPayload: Codable, Equatable, Sendable {
     public var messages: [PiChatMessage]
     public var sanitizedContext: PiSanitizedContext?
     public var recentMemory: [PiRecentMemory]
+    public var contextHistory: [PiContextRecord] = []
+    public var historyTimeZone: String = TimeZone.current.identifier
     public var maxTokens: Int
     public var maxDurationMs: Int
 

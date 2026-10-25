@@ -37,7 +37,10 @@ enum SensitiveContextPolicy {
             #"(?i)(?:验证码|one[ -]?time code|\botp\b)\D{0,12}\d{4,8}\b"#,
             #"\b[0-9a-fA-F]{32,}\b"#
         ]
-        if patterns.contains(where: { text.range(of: $0, options: .regularExpression) != nil }) {
+        if patterns.contains(where: {
+            guard let expression = try? NSRegularExpression(pattern: $0) else { return true }
+            return expression.firstMatch(in: text, range: NSRange(text.startIndex..<text.endIndex, in: text)) != nil
+        }) {
             return true
         }
 

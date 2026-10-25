@@ -65,6 +65,10 @@ let package = Package(
             dependencies: ["AgentOneCore", "AgentOneModelRuntime"]
         ),
         .testTarget(
+            name: "AgentOnePiRuntimeTests",
+            dependencies: ["AgentOneCore", "AgentOnePiRuntime"]
+        ),
+        .testTarget(
             name: "AgentOneCoreTests",
             dependencies: ["AgentOneCore"]
         ),

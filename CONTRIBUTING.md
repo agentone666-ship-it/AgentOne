@@ -7,10 +7,13 @@ AgentOne 仍处于快速迭代期。提交变更时，请把“用户能否理�
 1. 用 Issue 或变更说明写清用户问题、Context 输入、预期状态变化和隐私边界。
 2. 把可测试规则放入 `AgentOneCore`，避免只在 SwiftUI 中实现行为。
 3. 为 Context 链路增加单元测试、Harness 或真实 JSONL 进程 E2E。
-4. 运行 `./scripts/test_e2e.sh`。
+4. 运行 `npm ci --prefix AgentOneLifeRuntime` 和 `bash scripts/ci.sh all`。
 5. 检查截图、日志、fixture 和 diff 中没有真实用户数据或凭证。
 
 ## 提交规范
+
+从 `main` 建主题分支，通过 PR 合并；`all checks passed` 必须通过。
+CI、安装包下载、版本标签和草稿预发布的操作见 [CI/CD 指南](docs/CI_CD.md)。
 
 建议使用简洁的 Conventional Commit 风格：
 

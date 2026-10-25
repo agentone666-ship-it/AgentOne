@@ -73,14 +73,13 @@ public enum PiWakePolicy {
             context: context,
             recentMemory: makeRecentMemory(from: replay),
             budget: PiWakeBudget(
-                // Five closed tools plus the transformed Context already cost
-                // roughly 1.8k tokens in the Pi prompt. Keep the wake bounded,
-                // but leave enough headroom for one complete return-card turn.
-                maxTokens: 2_400,
+                // Include headroom for the historical search schema and a result.
+                maxTokens: 4_800,
                 maxTurns: 3,
                 maxDurationMs: 8_000,
                 allowedTools: [
                     .getCurrentContext,
+                    .searchContext,
                     .readRecentDiary,
                     .appendInnerJournal,
                     .showReturnCard,

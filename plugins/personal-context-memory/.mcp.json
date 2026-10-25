@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "personal-context-memory": {
+      "command": "/Users/zengjiabao/.local/bin/node",
+      "args": ["/Users/zengjiabao/plugins/personal-context-memory/server.mjs"]
+    }
+  }
+}

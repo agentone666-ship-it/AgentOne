@@ -46,8 +46,13 @@ npm test
 完整接口级 E2E：
 
 ```bash
-./scripts/test_e2e.sh
+bash scripts/ci.sh all
 ```
+
+该入口与 GitHub Actions 一致，包含 Runtime、Memory MCP、Swift 单测、5 个 Harness 和最终 ZIP 验证。
+可按层运行 `bash scripts/ci.sh runtime|swift|integration|package`（每次选择一项）。
+原 `./scripts/test_e2e.sh` 仍保留；它不包含全部 Swift 单测与 Memory MCP 门禁。
+详见 [CI/CD 指南](CI_CD.md)。
 
 生成 Release App：
 

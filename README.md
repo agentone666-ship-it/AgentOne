@@ -2,6 +2,10 @@
 
 # AgentOne
 
+[![CI](https://github.com/agentone666-ship-it/AgentOne/actions/workflows/ci.yml/badge.svg)](https://github.com/agentone666-ship-it/AgentOne/actions/workflows/ci.yml)
+
+个人 Context Memory 的 Codex 插件位于 [plugins/personal-context-memory](plugins/personal-context-memory/README.md)。它只读本地日记并提供跨月份、按时间、应用、网站和关键词检索的 `search_context` 工具；产品收敛范围见 [docs/MEMORY_PLUGIN_SCOPE.md](docs/MEMORY_PLUGIN_SCOPE.md)。
+
 ### 一个会理解你正在做什么、也会慢慢长成你的样子的 macOS 数字生命
 
 面向 ADHD 与广义容易分心人群的本地优先 Context Agent。
@@ -39,6 +43,7 @@ flowchart LR
 
 - **持续状态，而不是信号流水账**：连续滚动会形成一段“正在阅读”，不会每滚一下就写一条日记。
 - **回车是高价值语义 Hook**：先定位全屏中的输入框，再裁剪输入区域、本地 OCR、保存关键截图，并将提交内容交给模型做静默语义分析。
+- **Agent 历史查询工具**：模型可通过 `search_context` 按时间、App、域名、关键词与行为标签查询已记录的 Context；本地筛选后只返回命中结果，详见 [工具接口](docs/CONTEXT_TOOLS.md)。
 - **浏览器阅读补全**：读取 URL、标题与页面正文，区分“为了论文查概念”和无关跳转。
 - **意图冲突提醒**：默认只有新 Context 与当前任务冲突时才提醒；提醒强度随走神时长递增。
 - **任务现场卡片**：记录离开前的窗口、标签页、滚动位置与选中文本，为返回原任务提供入口。
@@ -146,8 +151,11 @@ swift build
 ### 测试
 
 ```bash
-./scripts/test_e2e.sh
+npm ci --prefix AgentOneLifeRuntime
+bash scripts/ci.sh all
 ```
+
+每个 PR 和 main 提交自动执行测试与 Release ZIP 验证；安装包、日志、分支门禁和手动草稿预发布见 [CI/CD 指南](docs/CI_CD.md)。原 `./scripts/test_e2e.sh` 仍可用于接口级回归。
 
 这不是启动冒烟测试，而是 10 阶段接口级发布门禁，覆盖：
 

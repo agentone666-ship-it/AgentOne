@@ -2,6 +2,7 @@ export const protocolVersion = 1 as const;
 
 export const safeToolNames = [
   "get_current_context",
+  "search_context",
   "search_memory",
   "read_recent_diary",
   "append_inner_journal",
@@ -40,6 +41,14 @@ export interface SanitizedContext {
   driftDurationSeconds?: number;
 }
 
+export interface ContextRecord {
+  id: string;
+  eventID: string;
+  timestamp: string;
+  kind: string;
+  context: SanitizedContext;
+}
+
 export interface MemorySnippet {
   id: string;
   timestamp: string;
@@ -60,6 +69,8 @@ export interface WakePayload {
   reason: string;
   sanitizedContext: SanitizedContext;
   recentMemory: MemorySnippet[];
+  contextHistory?: ContextRecord[];
+  historyTimeZone?: string;
   budget: WakeBudget;
 }
 
@@ -73,6 +84,8 @@ export interface ChatPayload {
   messages: ChatMessage[];
   sanitizedContext?: SanitizedContext;
   recentMemory: MemorySnippet[];
+  contextHistory?: ContextRecord[];
+  historyTimeZone?: string;
   maxTokens: number;
   maxDurationMs: number;
 }
@@ -242,6 +255,8 @@ function parseChatPayload(raw: Record<string, unknown>): ChatPayload {
     .slice(purpose === "daily_digest" ? -64 : -20);
   return {
     purpose,
+    contextHistory: parseContextHistory(raw.contextHistory),
+    historyTimeZone: parseTimeZone(raw.historyTimeZone),
     messages,
     ...(context ? { sanitizedContext: context } : {}),
     recentMemory,
@@ -267,7 +282,7 @@ function parseWakePayload(raw: Record<string, unknown>): WakePayload {
       })
     : defaultBudget();
 
-  return { reason: raw.reason, sanitizedContext, recentMemory, budget };
+  return { reason: raw.reason, sanitizedContext, recentMemory, budget, contextHistory: parseContextHistory(raw.contextHistory), historyTimeZone: parseTimeZone(raw.historyTimeZone) };
 }
 
 function parseSanitizedContext(context: Record<string, unknown>): SanitizedContext {
@@ -348,4 +363,22 @@ function isSafeToolName(value: string): value is SafeToolName {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseTimeZone(value: unknown): string {
+  const zone = typeof value === "string" ? value : "UTC";
+  new Intl.DateTimeFormat("en", { timeZone: zone });
+  return zone;
+}
+
+function parseContextHistory(value: unknown): ContextRecord[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error("Invalid contextHistory");
+  return value.map((item) => {
+    if (!isRecord(item) || typeof item.id !== "string" || typeof item.eventID !== "string" ||
+        typeof item.timestamp !== "string" || !Number.isFinite(Date.parse(item.timestamp)) ||
+        typeof item.kind !== "string" || !isRecord(item.context)) throw new Error("Invalid history record");
+    return { id: item.id, eventID: item.eventID, timestamp: item.timestamp, kind: item.kind,
+      context: parseSanitizedContext(item.context) };
+  });
 }

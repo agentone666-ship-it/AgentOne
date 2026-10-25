@@ -108,7 +108,7 @@ class OpenAIResponsesMock {
     if (isAnthropicMessages) {
       const isContextEnrichment = JSON.stringify(body.system ?? "").includes("activity_title");
       const isDailyDigest = JSON.stringify(body.system ?? "").includes("unfinished_thread");
-      const events = tools.length > 0 && this.successTurn === 1
+      const events = JSON.stringify(tools).includes("show_return_card") && this.successTurn === 1
         ? anthropicToolCallEvents()
         : anthropicTextEvents(isContextEnrichment
           ? JSON.stringify({
@@ -151,9 +151,14 @@ class OpenAIResponsesMock {
       response.end();
       return;
     }
+    if (isChatCompletions && body.stream === false) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "我把刚才的论文线索放回你手边了。" }, finish_reason: "stop" }], usage: { prompt_tokens: 120, completion_tokens: 25, total_tokens: 145 } }));
+      return;
+    }
     const events = isChatCompletions
-      ? (tools.length > 0 && this.successTurn === 1 ? chatToolCallEvents() : chatTextEvents())
-      : (tools.length > 0 && this.successTurn === 1 ? toolCallEvents() : textEvents());
+      ? (JSON.stringify(tools).includes("show_return_card") && this.successTurn === 1 ? chatToolCallEvents() : chatTextEvents())
+      : (JSON.stringify(tools).includes("show_return_card") && this.successTurn === 1 ? toolCallEvents() : textEvents());
     response.writeHead(200, {
       "content-type": "text/event-stream",
       "cache-control": "no-cache",
