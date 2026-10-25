@@ -3,10 +3,11 @@
 ## STATUS
 
 - 起始本地版本：`0612cf1`，工作区干净。
-- GitHub `origin/main`：`e2461fe`，比本地少一笔 Memory 功能提交（30 个文件）。
+- 起始 GitHub `origin/main`：`e2461fe`，比本地少一笔 Memory 功能提交（30 个文件）。
 - CI/CD 改动在 `codex/github-ci-cd`；本地全量验证通过。
 - 用户已确认以当前本地项目为准；已有 Memory 提交和独立 CI/CD 提交均已推送主题分支。
-- PR 云端 CI 和 main 分支保护正在验证，尚未合并。
+- [PR #1](https://github.com/agentone666-ship-it/AgentOne/pull/1) 已创建；首轮云端 CI 全绿，main 分支保护已应用并回读。
+- PR 保持待合并；main 合并后获得新版工作流、模板和 Dependabot 配置。最新 Checks 以 PR 页面为准。
 - 尚未公开发布任何安装包。
 
 ## DECISIONS
@@ -41,12 +42,28 @@
 - `npm audit --omit=dev --audit-level=high`：0 vulnerabilities。
 - actionlint 1.7.12、Bash/Zsh 语法、`git diff --check`：通过。
 
-本地通过不代表 GitHub runner 通过；远端结果须另外记录。
+### GitHub Runner 验证
+
+[CI run 40177217404](https://github.com/agentone666-ship-it/AgentOne/actions/runs/40177217404)，PR head `24be172`：
+
+- Workflow lint、Runtime Node 22.19.0、Runtime Node 24、macOS tests and package、all checks passed 全部 success。
+- macOS 的 Swift 测试、五个 Harness、生产打包与最终 ZIP 黑盒 E2E 全部通过。
+- `AgentOne-macos-arm64` artifact 已上传（约 55 MB），包含 ZIP 与 SHA256SUMS；三份测试日志 artifact 已上传。
+- 本记录后续提交只更新文档；最新提交的门禁状态以 PR Checks 为准。
+
+### GitHub 服务端设置（已应用并回读）
+
+- 仅 squash merge；合并后删除主题分支；允许更新落后的 PR 分支。
+- main 必需检查为 GitHub Actions app（15368）产生的 `all checks passed`，strict/up-to-date 开启。
+- main 必须通过 PR；线性历史、解决讨论、管理员约束开启；强推与删除关闭。
+- 单维护者阶段 required approving reviews 为 0，不要求作者批准自己的 PR。
+- `release-preview` environment 已创建，仅允许 `v*` tag；未设置 required reviewer。
+- 默认 workflow token 为 read，禁止 Actions 批准 PR review（原设置已核实保留）。
 发布流程已静态检查，尚未创建版本标签或执行草稿 release。
 
 ## HANDOFF
 
 - 入口与日常操作：[CI_CD.md](CI_CD.md)。
-- 同步范围已确认；通过 PR 验证实际 GitHub CI，并补记运行结果。
-- 远端全绿后配置 main required check 和仓库合并设置，回读确认实际生效。
+- 同步与云端验证已完成；PR #1 保持待合并，未公开发布。
+- 服务端 main required check、合并设置和 tag 环境限制均已回读确认。
 - Developer ID、公证、正式升级通道、真实模型质量和系统权限验收仍不在已完成范围内。
