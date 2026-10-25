@@ -2,197 +2,128 @@
 
 # AgentOne
 
+**把经历留下，把行动交给你的 Agent。**
+
+macOS 灵动岛 · 自动混合录音 · 事件记录 · 可追溯的个人记忆 · 通用 MCP
+
 [![CI](https://github.com/agentone666-ship-it/AgentOne/actions/workflows/ci.yml/badge.svg)](https://github.com/agentone666-ship-it/AgentOne/actions/workflows/ci.yml)
-
-个人 Context Memory 的 Codex 插件位于 [plugins/personal-context-memory](plugins/personal-context-memory/README.md)。它只读本地日记并提供跨月份、按时间、应用、网站和关键词检索的 `search_context` 工具；产品收敛范围见 [docs/MEMORY_PLUGIN_SCOPE.md](docs/MEMORY_PLUGIN_SCOPE.md)。
-
-### 一个会理解你正在做什么、也会慢慢长成你的样子的 macOS 数字生命
-
-面向 ADHD 与广义容易分心人群的本地优先 Context Agent。
 
 </div>
 
-![AgentOne 此刻界面](docs/images/agentone-now.png)
+> “今天早上在工位和同事聊的那个需求，帮我找出录音，整理成待办，再接着做。”
 
-> [!IMPORTANT]
-> AgentOne 目前是可运行的 macOS 原型，而不是可直接分发的成熟产品。它会接触屏幕、Accessibility 与行为信号；请先阅读[隐私边界](docs/PRIVACY.md)，再授予系统权限。
+AgentOne 为这类需求保留现场：电脑声音与麦克风混成一条录音，并关联时间、手动标注的地点和电脑活动。你连接的 Agent 通过 MCP 查找候选、核对原话与上下文，再提取长期记忆或执行你授权的事项。
 
-## 为什么做 AgentOne
+**现在的界面是屏幕顶部的灵动岛。** 鼠标移到刘海区域展开，移开收起；也可以固定展开。记录、回忆和设置都在岛内完成。
 
-大多数助手只在用户发出命令后工作。AgentOne 想解决的是另一类问题：当一个人已经走神、忘记原任务，甚至不知道该问什么时，助手能否仍然理解“刚才发生了什么”，用足够轻的方式把人带回来。
+> **开发预览**：新版应用代码与构建入口位于 [`codex/audio-memory-mvp`](https://github.com/agentone666-ship-it/AgentOne/tree/codex/audio-memory-mvp)，见 [PR #2](https://github.com/agentone666-ship-it/AgentOne/pull/2)。本页提前更新产品介绍；`main` 的应用代码仍处于迁移前版本。新版尚未作为正式版本发行。
 
-它的核心不是统计打开过哪些 App，而是把滚动、点击、输入、回车、应用切换、窗口标题、浏览器 URL、可见正文和关键截图聚合成持续的活动状态，推断用户此刻的真实意图。
+## 现在的界面
 
-LUMA 是 AgentOne 的抽象生命体形象。它不是悬浮的效率按钮，而是朋友与 Jarvis 之间的关系：会观察、会好奇、会保留没说出口的想法，也会因为共同经历而形成记忆和 Skill。
+<p align="center">
+  <img src="docs/images/island-record.png" alt="灵动岛记录页：系统声音与麦克风合并为一条录音，支持地点标注和暂停" width="440" />
+  <img src="docs/images/island-recall.png" alt="灵动岛回忆页：搜索声音、查看转写和标签、回放原音" width="440" />
+</p>
 
-## 已落地的产品闭环
+<p align="center">
+  <img src="docs/images/island-events.png" alt="灵动岛事件页：统一查看旧 Diary 与新的现场活动线索" width="440" />
+  <img src="docs/images/island-settings.png" alt="灵动岛设置页：自动记录、登录启动、锁屏暂停、本机转写与原音访问" width="440" />
+</p>
+
+以上图片由当前原生 SwiftUI 界面离屏渲染，使用明确标注的演示数据，不含真实录音、转写或电脑活动。演示中的地点与对话不代表实际记录。
+
+## 它会保留什么
+
+| 信息 | 如何帮助回忆 |
+| --- | --- |
+| 一条混合录音 | 系统音与麦克风按同一时间轴对齐，分段保存，回放和转写共用一条录音 |
+| 时间与现场 | 保留开始时间、时长、输入状态、暂停或断流信息；地点由用户手动标注 |
+| 电脑事件 | 关联应用、窗口、可读取的页面与交互线索；旧 Diary 也可检索，细节取决于系统授权 |
+| 转写与标签 | 可选本机语音转写；连接的 Agent 领取分析任务，写回主题、事实与待办候选 |
+| 长期记忆 | 保存来源引用、有效时间、得知时间与更新替代关系，支持日后重新核查 |
+
+原音和现场线索保存在本机。附近打开的网页只是线索，不能当成谈话原话；提到一个人，也不能直接认定他就是录音中的说话人。
+
+## 从模糊回忆到下一步
 
 ```mermaid
 flowchart LR
-    A["行为信号<br/>滚动 · 点击 · 输入 · 回车 · 切换"] --> B["持续活动状态<br/>去重 · 聚合 · 分段"]
-    C["语义 Context<br/>窗口 · URL · 正文 · 选区"] --> B
-    D["关键证据<br/>输入框定位 · 局部截图 · OCR"] --> B
-    B --> E["意图与冲突判断"]
-    E --> F["轻提醒与一键返回"]
-    B --> G["Context 回放"]
-    B --> H["Agent 日记"]
-    G --> I["Memory 与 Skills"]
-    H --> I
-    I --> E
+    A["系统声音 + 麦克风"] --> B["一条分段录音"]
+    C["时间 · 地点 · 电脑事件"] --> D["关联现场"]
+    B --> D
+    D --> E["MCP 检索候选"]
+    E --> F["核对原话与上下文"]
+    F --> G["你的 Agent：记忆 · 待办 · 行动"]
 ```
 
-- **持续状态，而不是信号流水账**：连续滚动会形成一段“正在阅读”，不会每滚一下就写一条日记。
-- **回车是高价值语义 Hook**：先定位全屏中的输入框，再裁剪输入区域、本地 OCR、保存关键截图，并将提交内容交给模型做静默语义分析。
-- **Agent 历史查询工具**：模型可通过 `search_context` 按时间、App、域名、关键词与行为标签查询已记录的 Context；本地筛选后只返回命中结果，详见 [工具接口](docs/CONTEXT_TOOLS.md)。
-- **浏览器阅读补全**：读取 URL、标题与页面正文，区分“为了论文查概念”和无关跳转。
-- **意图冲突提醒**：默认只有新 Context 与当前任务冲突时才提醒；提醒强度随走神时长递增。
-- **任务现场卡片**：记录离开前的窗口、标签页、滚动位置与选中文本，为返回原任务提供入口。
-- **双视角记录**：回放回答“我今天具体做了什么”；Agent 日记回答“LUMA 从这些 Context 里理解到了什么”。
-- **不可篡改的追加式记忆**：原记录不被覆盖，纠正、隐藏与新理解都作为后续事件追加。
-- **自动成长的 Skills**：真实反馈会强化同一个 Skill，按证据、置信度和修正次数逐级解锁详情。
-- **主动陪伴**：在合适时机轻提醒、邀请聊天或提出有用的下一步，而不把主动性退化成通知轰炸。
+1. **自动留下现场**：首次完成系统音和麦克风授权后，自动记录；手动暂停会保留，不会因重启自行取消。
+2. **按线索找回来**：Agent 综合主题、时间、地点和事件查找录音；有多个候选时继续核查或向你确认。
+3. **核对后再落实**：通过来源与上下文区分提议、承诺和已取消事项，再由宿主 Agent 执行当前授权范围内的任务。
 
-## 界面
+AgentOne 提供采集、检索和记忆接口。持续分析与行动需要你选择的 MCP 宿主运行；接入插件本身不会让已关闭的 Agent 自动工作。
 
-### 此刻：让采集、模型和日记链路变得可见
+## 运行新版
 
-![AgentOne 此刻与 Context 状态](docs/images/agentone-now.png)
-
-### 回放：按语义片段快速回顾一天
-
-![AgentOne Context 回放](docs/images/agentone-replay.png)
-
-### Skills：共同经历沉淀成可查看、可成长的能力
-
-![AgentOne Skills](docs/images/agentone-skills.png)
-
-以上截图由仓库内置的脱敏文档演示模式生成，不包含真实 Agent Home、聊天、工作内容或凭证。
-
-## LUMA：数字生命，而不是工具皮肤
-
-LUMA 的视觉由意识核、记忆轨道和不断变化的粒子轮廓组成：
-
-- 专注时，轨道收束，和用户一起安静工作。
-- 好奇时，它靠近 Context，但先问一个中性问题。
-- 发现冲突时，提醒从形象变化逐级增加，而不是立刻弹窗打断。
-- 用户回到任务时，它会庆祝，但避免抢走注意力。
-- 它可以“想而不说”；可展示的是经过整理的工作性思考，不保存或伪装原始模型推理链。
-
-更多产品原则见 [产品愿景](docs/PRODUCT_VISION.md) 与历史 [PRD v0.2](docs/PRD-v0.2.md)。
-
-## 技术架构
-
-AgentOne 由三个明确分工的边界组成：
-
-1. **Swift/macOS 应用层**：全局信号、Accessibility、关键截图、隐私防火墙、状态聚合、意图引擎、日记与全部用户界面。
-2. **AgentOneCore**：可测试、与 UI 解耦的 Context、Activity Session、Replay、Memory、Skill 和提醒策略。
-3. **Pi Runtime Sidecar**：基于 Pi Agent Core 的受限模型循环，通过 stdin/stdout JSONL 与 Swift 通信，只暴露白名单工具和明确的 token/时间预算。
-
-```text
-macOS Hooks / Accessibility / Screen Capture
-                    │
-                    ▼
-       SensitiveContextPolicy
-                    │
-                    ▼
-   Activity Session + Intent + Diary Core
-          │                     │
-          │                     ├── Replay / Journal / Memory / Skills
-          ▼
-   Wake Policy + JSONL Bridge
-                    │
-                    ▼
-       Pi Agent Core Sidecar
-                    │
-                    ▼
-  Kimi OAuth / OpenAI-compatible API / Offline
-```
-
-完整说明见 [架构文档](docs/ARCHITECTURE.md)。
-
-## 隐私边界
-
-- 不需要 AgentOne 账号，Context 归用户所有。
-- Agent Home 由用户选择，日记以 Markdown 与结构化事件保存在本机。
-- 密码、验证码、支付与银行 Context 是不可覆盖的禁止采集区，即使用户主动要求也不会开启。
-- 聊天正文等内容属于可授权 Context；是否采集由用户设置决定。
-- 不录制连续屏幕视频。关键截图由语义 Hook 触发，只保留与当前事件有关的局部证据。
-- 用户可以隐藏敏感片段，但不能静默改写历史；纠正会以新的追加事件保留。
-- 使用云模型时，只发送通过隐私策略与预算门的 Context。API Key 保存在用户目录下权限为 `0600` 的私密文件中，不进入仓库或 JSONL 消息。
-
-更完整的威胁边界、数据生命周期和发布检查见 [PRIVACY.md](docs/PRIVACY.md)。
-
-## 本地开发
-
-### 环境要求
-
-- macOS 14+
-- Xcode/Swift 6.1+
-- Node.js 22.19+
-- Deno（用于把 TypeScript Sidecar 编译成应用内自包含可执行文件）
-
-### 安装依赖
+需要 macOS 15+、Swift 6.1+；MCP 服务需要 Node.js 22.19+。
 
 ```bash
-cd AgentOneLifeRuntime
-npm ci
-cd ..
-```
+git clone https://github.com/agentone666-ship-it/AgentOne.git
+cd AgentOne
+git switch codex/audio-memory-mvp
+swift run AgentOne
 
-### 构建
-
-```bash
-swift build
+# 构建安装包
 ./scripts/build_app.sh release
 ```
 
-产物位于 `build/AgentOne.app.zip`。项目在 iCloud Drive 中开发时，请先把 ZIP 解压到普通本地目录后再启动，避免 File Provider 元数据破坏代码签名。
+安装包生成在 `build/AgentOne.app.zip`。在 iCloud 工作区构建时，先解压到普通本地目录，再启动。
 
-### 测试
+- 鼠标悬停刘海约 0.16 秒展开，离开约 0.6 秒收起；图钉可保持展开。无刘海显示器使用顶部胶囊。
+- 「记录」页查看输入状态、标注地点、暂停或恢复记录。
+- 「回忆」页切换声音与事件，搜索转写、主题或地点，并回放原音。
+- 「设置」页管理自动记录、登录启动、锁屏暂停、本机转写和 Agent 原音访问。登录启动以系统实际批准为准。
+
+## 连接你的 Agent
+
+在新版分支中生成通用 MCP 配置：
 
 ```bash
+node scripts/print_mcp_config.mjs
+# 或使用已安装应用中的服务（改为你的实际路径）
+node scripts/print_mcp_config.mjs '/Applications/AgentOne.app'
+```
+
+把输出加入宿主的 MCP 配置。通过 `recall_context` 查候选，`get_context_bundle` 取原话与上下文，`get_context_event` 核查事件来源。`recall_and_act` prompt 引导宿主完成查找、确认与行动交接。
+
+默认数据目录为 `~/Documents/AgentOne Home/Memory`，也兼容现有 Agent Home 的 `Memory` 子目录；可用 `AGENTONE_MEMORY_HOME` 自定义。
+
+工具与后台分析队列见 [新版 MCP 说明](https://github.com/agentone666-ship-it/AgentOne/blob/codex/audio-memory-mvp/plugins/agentone-memory/README.md)。
+
+## 验证与当前边界
+
+新版分支可运行：
+
+```bash
+swift test
+swift run AgentOneAudioHarness
+node --test plugins/agentone-memory/test.mjs
+node benchmarks/recall/run.mjs --check
+
+# 包括迁移期历史回归与安装包检查
 npm ci --prefix AgentOneLifeRuntime
 bash scripts/ci.sh all
 ```
 
-每个 PR 和 main 提交自动执行测试与 Release ZIP 验证；安装包、日志、分支门禁和手动草稿预发布见 [CI/CD 指南](docs/CI_CD.md)。原 `./scripts/test_e2e.sh` 仍可用于接口级回归。
+CI 检查音频编码与持久化、MCP 子进程、证据校验、任务队列和安装包。模糊回忆固定合成场景通过 **18/18**，探索性语言挑战为 **2/4**；这些结果不代表真实语音识别、多人对话或宿主执行的准确率。详见 [Recall Benchmark](https://github.com/agentone666-ship-it/AgentOne/blob/codex/audio-memory-mvp/benchmarks/recall/README.md)。
 
-这不是启动冒烟测试，而是 10 阶段接口级发布门禁，覆盖：
+已有短时真机混音、本机转写、历史事件导入与原音校验；全天稳定性、真实对话检索效果和宿主完整执行仍需继续验收。目前检索采用词面匹配和宿主查询扩展，尚无向量检索、自动定位或可靠的说话人识别。
 
-- TypeScript 单元测试与真实 JSONL 子进程 E2E
-- Swift Context/Memory 生产路径 Harness
-- OpenAI-compatible 模型接口 Harness
-- Swift ↔ Pi Sidecar 进程边界
-- Kimi OAuth 本地接口
-- 凭证文件权限
-- Release App 打包、签名与内嵌 Sidecar 黑盒测试
+## 隐私与开发
 
-详细开发说明见 [DEVELOPMENT.md](docs/DEVELOPMENT.md)。
+不需要 AgentOne 云账号。原音访问需要单独开启；接入宿主后，宿主可能把读取的资料交给云模型。本机文件权限保护不等于应用级加密。使用前请阅读 [新版隐私说明](https://github.com/agentone666-ship-it/AgentOne/blob/codex/audio-memory-mvp/docs/PRIVACY.md)。
 
-## 仓库结构
+新版默认应用由 `AgentOneCaptureApp`、`AgentOneCaptureKit` 与 `plugins/agentone-memory` 组成。旧界面代码仅保留迁移回归，新版分发使用灵动岛与通用 MCP。
 
-```text
-AgentOne/
-├── Sources/
-│   ├── AgentOneApp/              # macOS UI、采集、模型与 Sidecar 桥接
-│   ├── AgentOneCore/             # Context、意图、日记、回放、Memory、Skills
-│   ├── AgentOneModelAuth/        # Kimi device OAuth
-│   └── AgentOneCredentialStore/  # 本机凭证文件
-├── AgentOneLifeRuntime/          # Pi Agent Core TypeScript Sidecar
-├── Tests/                        # Swift 单元测试
-├── scripts/                      # 构建与接口级 E2E
-├── docs/                         # 产品、架构、隐私与截图
-└── Package.swift
-```
+[开发与 CI/CD](docs/CI_CD.md) · [新版实现状态](https://github.com/agentone666-ship-it/AgentOne/blob/codex/audio-memory-mvp/docs/vnext/STATUS_CAPTURE_MEMORY.md) · [贡献](CONTRIBUTING.md) · [安全](SECURITY.md)
 
-## 当前状态与下一步
-
-已可真实运行：全局行为信号、持续 Activity Session、浏览器 URL、回车输入框 ROI 截图/OCR、模型 Context 分析、回放、Agent 日记、Memory、Skill 成长、聊天、Kimi OAuth 和 OpenAI-compatible API。
-
-仍属于产品与工程探索中的方向：更稳健的跨应用恢复、完全本地模型路由、移动端定位协同、外卖/购物视觉执行、长期主动惊喜策略，以及经过签名和公证的公开发行版本。
-
-## 贡献与安全
-
-- 提交代码前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
-- 安全与隐私问题请按 [SECURITY.md](SECURITY.md) 中的方式报告，不要在公开 Issue 中附带真实截图、日记或 API Key。
-- 当前仓库尚未授予开源许可证；未经明确许可，请勿复制或再分发项目代码与素材。
+当前仓库尚未授予开源许可证；未经明确许可，请勿复制或再分发项目代码与素材。
