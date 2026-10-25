@@ -1,0 +1,20 @@
+name: 功能建议
+description: 描述用户问题、预期行为和验收标准
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 用户问题
+      description: 在什么场景下遇到什么问题？请使用脱敏信息。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为与验收标准
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: 涉及的数据和权限

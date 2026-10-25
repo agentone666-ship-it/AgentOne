@@ -1,0 +1,20 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ['*']
+  - package-ecosystem: npm
+    directory: /AgentOneLifeRuntime
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      pi-runtime:
+        patterns: ['@earendil-works/*']
+      development:
+        dependency-type: development

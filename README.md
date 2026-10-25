@@ -2,6 +2,8 @@
 
 # AgentOne
 
+[![CI](https://github.com/agentone666-ship-it/AgentOne/actions/workflows/ci.yml/badge.svg)](https://github.com/agentone666-ship-it/AgentOne/actions/workflows/ci.yml)
+
 个人 Context Memory 的 Codex 插件位于 [plugins/personal-context-memory](plugins/personal-context-memory/README.md)。它只读本地日记并提供跨月份、按时间、应用、网站和关键词检索的 `search_context` 工具；产品收敛范围见 [docs/MEMORY_PLUGIN_SCOPE.md](docs/MEMORY_PLUGIN_SCOPE.md)。
 
 ### 一个会理解你正在做什么、也会慢慢长成你的样子的 macOS 数字生命
@@ -149,8 +151,11 @@ swift build
 ### 测试
 
 ```bash
-./scripts/test_e2e.sh
+npm ci --prefix AgentOneLifeRuntime
+bash scripts/ci.sh all
 ```
+
+每个 PR 和 main 提交自动执行测试与 Release ZIP 验证；安装包、日志、分支门禁和手动草稿预发布见 [CI/CD 指南](docs/CI_CD.md)。原 `./scripts/test_e2e.sh` 仍可用于接口级回归。
 
 这不是启动冒烟测试，而是 10 阶段接口级发布门禁，覆盖：
 

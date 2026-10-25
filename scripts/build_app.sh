@@ -4,6 +4,13 @@ set -euo pipefail
 script_dir="${0:A:h}"
 project_dir="${script_dir:h}"
 configuration="${1:-debug}"
+# A single product version feeds local bundles, CI artifacts and release tags.
+app_version="$(cd "$project_dir/AgentOneLifeRuntime" && node -p 'require("./package.json").version')"
+build_number="${AGENTONE_BUILD_NUMBER:-1}"
+if [[ ! "$app_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || ! "$build_number" =~ ^[0-9]+$ ]]; then
+    echo "App version must be X.Y.Z and build number must be numeric." >&2
+    exit 1
+fi
 build_dir="$project_dir/build"
 archive_path="$build_dir/AgentOne.app.zip"
 staging_dir="$(mktemp -d "${TMPDIR:-/tmp}/agentone-app-build.XXXXXX")"
@@ -98,6 +105,8 @@ cat > "$contents_dir/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $app_version" "$contents_dir/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" "$contents_dir/Info.plist"
 
 # Signing directly inside an iCloud Drive workspace is unreliable because the
 # File Provider can immediately re-attach FinderInfo/resource-fork metadata to

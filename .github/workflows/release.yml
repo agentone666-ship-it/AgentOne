@@ -1,0 +1,67 @@
+name: Release preview
+
+# Select an existing vX.Y.Z tag in Actions. Build once, publish verified bytes.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-preview-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require version tag on main
+        env:
+          RELEASE_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          version=$(node -p 'require("./AgentOneLifeRuntime/package.json").version')
+          [[ "$RELEASE_REF" == "refs/tags/v$version" ]] || { echo '::error::Select the vX.Y.Z tag matching package.json'; exit 1; }
+          git merge-base --is-ancestor HEAD origin/main
+
+  validate:
+    needs: verify-source
+    uses: ./.github/workflows/ci.yml
+
+  draft-release:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: release-preview
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: AgentOne-macos-arm64
+          path: release
+      - name: Verify and create a draft prerelease
+        working-directory: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          sha256sum --check SHA256SUMS
+          cat > NOTES.md <<'NOTES'
+          macOS 14+ / Apple Silicon prototype build.
+
+          This build has an ad-hoc signature and is not Apple notarized. It is
+          intended for development preview, not a trusted public distribution.
+          SHA256SUMS verifies the ZIP produced and tested by this workflow.
+
+          Screen Recording, Accessibility, real foreground capture and live
+          model quality still require separate manual acceptance on macOS.
+          NOTES
+          gh release create "$RELEASE_TAG" AgentOne.app.zip SHA256SUMS --verify-tag --draft --prerelease --title "AgentOne $RELEASE_TAG (development preview)" --notes-file NOTES.md
