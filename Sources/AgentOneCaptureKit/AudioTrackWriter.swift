@@ -35,7 +35,7 @@ public final class AudioTrackWriter: @unchecked Sendable {
               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(description),
               let inputFormat = AVAudioFormat(streamDescription: asbd) else { return }
         let frames = CMSampleBufferGetNumSamples(sample)
-        guard frames > 0, frames <= Int(UInt32.max),
+        guard frames > 0, frames <= Int(Int32.max),
               let buffer = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: AVAudioFrameCount(frames)) else { return }
         buffer.frameLength = AVAudioFrameCount(frames)
         guard CMSampleBufferCopyPCMDataIntoAudioBufferList(sample, at: 0, frameCount: Int32(frames), into: buffer.mutableAudioBufferList) == noErr else {

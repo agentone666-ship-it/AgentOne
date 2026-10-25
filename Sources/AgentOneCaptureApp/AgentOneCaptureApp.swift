@@ -15,6 +15,7 @@ import SwiftUI
     @Published var message = "点击开启后，才会请求系统音与麦克风权限"
     @Published var place = UserDefaults.standard.string(forKey: "vNext.place") ?? ""
     @Published var autoResume = UserDefaults.standard.bool(forKey: "vNext.autoResume")
+    @Published var pauseOnLock = (UserDefaults.standard.object(forKey: "vNext.pauseOnLock") as? Bool) ?? true
     @Published var query = ""
     @Published var rows: [[String: String]] = []
     @Published var pending = 0
@@ -28,7 +29,7 @@ import SwiftUI
     private var desiredRecording = false
     private var sleeping = false
     private var locked = false
-    private var suspended: Bool { sleeping || locked }
+    private var suspended: Bool { sleeping || (locked && pauseOnLock) }
     private var observers: [NSObjectProtocol] = []
     private var polling: Task<Void,Never>?
 
@@ -60,7 +61,7 @@ import SwiftUI
             Task { @MainActor in await self?.resumeAfterSuspension(reason: "sleep") }
         })
         observers.append(DistributedNotificationCenter.default().addObserver(forName: NSNotification.Name("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.locked = true; await self?.stop(reason: "screen_locked") }
+            Task { @MainActor in self?.locked = true; if self?.pauseOnLock == true { await self?.stop(reason: "screen_locked") } }
         })
         observers.append(DistributedNotificationCenter.default().addObserver(forName: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in await self?.resumeAfterSuspension(reason: "screen_locked") }
@@ -83,8 +84,15 @@ import SwiftUI
 
     func toggleRecording() {
         guard !demo, !busy else { return }
-        if recording { desiredRecording = false; UserDefaults.standard.set(false,forKey: "vNext.captureDesired"); Task { await stop(reason: "user_paused") } }
+        if recording { pauseRecording() }
         else { desiredRecording = true; Task { await start(prompts: true) } }
+    }
+
+    func pauseRecording() {
+        guard !demo else { return }
+        desiredRecording = false
+        UserDefaults.standard.set(false,forKey: "vNext.captureDesired")
+        Task { await stop(reason: "user_paused") }
     }
 
     private func start(prompts: Bool) async {
@@ -98,7 +106,7 @@ import SwiftUI
             hasError = false
             UserDefaults.standard.set(true, forKey: "vNext.captureConsent")
             UserDefaults.standard.set(true, forKey: "vNext.captureDesired")
-            message = "两路分别保存 · 锁屏时暂停 · 原音访问需单独开启"
+            message = "两路分别保存 · 原音访问需单独开启"
         } catch { hasError = true; desiredRecording = false; UserDefaults.standard.set(false,forKey: "vNext.captureDesired"); recording = false; message = error.localizedDescription }
     }
 
@@ -115,7 +123,7 @@ import SwiftUI
         desiredRecording = false // Cancel an in-flight permission/start request.
         polling?.cancel()
         await stop(reason: "application_exit")
-        _ = try? database?.execute("UPDATE jobs SET state='pending',lease_token=NULL,lease_until_ms=NULL WHERE state='leased' AND lease_owner='native-local-asr'")
+        worker?.releaseOwnLeases()
     }
 
     private func resumeAfterSuspension(reason: String) async {
@@ -138,6 +146,7 @@ import SwiftUI
         do {
             if value { try SMAppService.mainApp.register() }
             else if SMAppService.mainApp.status != .notRegistered { try SMAppService.mainApp.unregister() }
+            if value && SMAppService.mainApp.status == .requiresApproval { message = "请在系统设置的登录项目中允许 AgentOne，自动续录设置才会生效。" }
         } catch { message = "自动续录偏好已保存；登录启动需在系统设置中确认或使用打包的 App。" }
     }
 
@@ -222,6 +231,7 @@ private struct IslandView: View {
                     Text("你标注").font(.caption2).foregroundStyle(.secondary)
                 }
                 Toggle("下次登录自动续录",isOn: Binding(get: {model.autoResume},set: {model.setAutoResume($0)})).font(.caption).disabled(model.demo)
+                Toggle("锁屏时暂停（可关闭以尽量全录）",isOn: $model.pauseOnLock).font(.caption).disabled(model.demo).onChange(of: model.pauseOnLock) { _,value in UserDefaults.standard.set(value,forKey: "vNext.pauseOnLock") }
                 Toggle("允许 MCP 读取原音（宿主可能使用云模型）",isOn: Binding(get: {model.audioExport},set: {model.setAudioExport($0)})).font(.caption2).disabled(model.demo)
                 HStack {
                     Text(model.asrStatus).font(.caption2).foregroundStyle(.secondary)
@@ -338,7 +348,7 @@ private final class IslandPanel: NSPanel { override var canBecomeKey: Bool { tru
     var body: some Scene {
         MenuBarExtra("AgentOne",systemImage: "waveform.circle") {
             Button("展开灵动岛") { CaptureModel.shared.expanded = true }
-            Button(CaptureModel.shared.recording ? "暂停录音" : "开启双路录音") { CaptureModel.shared.toggleRecording() }
+            Button("暂停录音") { CaptureModel.shared.pauseRecording() }
             Divider()
             Button("退出 AgentOne") { NSApp.terminate(nil) }
         }

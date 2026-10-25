@@ -46,6 +46,7 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
     func finish() async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             queue.async {
+                self.failed = true // Late callbacks cannot reopen a sealed track.
                 do { try self.system.finish(); try self.microphone.finish(); continuation.resume() }
                 catch { continuation.resume(throwing: error) }
             }
@@ -106,6 +107,7 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             isRecording = true
             try database.setCaptureState("recording", detail: "system_audio+microphone")
         } catch {
+            isRecording = false
             if let stream { try? await stream.stopCapture() }
             if let sink { try? await sink.finish() }
             stream = nil; sink = nil; releaseLock()
