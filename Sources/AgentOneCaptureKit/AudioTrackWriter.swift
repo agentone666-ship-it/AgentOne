@@ -3,9 +3,7 @@ import CoreMedia
 import CryptoKit
 import Foundation
 
-/// One writer per source; both receive the same wall/host-clock anchor.
-/// This keeps independent tracks and original presentation timestamps instead
-/// of mixing system output with microphone echo or guessing speaker identity.
+/// Persists one timestamped stream (mixed by default; legacy source tracks remain readable).
 public final class AudioTrackWriter: @unchecked Sendable {
     private let database: MemoryDatabase
     private let source: String
@@ -14,6 +12,7 @@ public final class AudioTrackWriter: @unchecked Sendable {
     private let hostAnchor: Double
     private let segmentSeconds: Double
     private let metadata: @Sendable () -> (String?, String)
+    private let finishingContext: @Sendable () -> String
     private var file: AVAudioFile?
     private var segmentID: String?
     private var url: URL?
@@ -28,26 +27,29 @@ public final class AudioTrackWriter: @unchecked Sendable {
     public private(set) var sealedCount = 0
 
     public init(database: MemoryDatabase, source: String, sessionID: String, wallAnchor: Date, hostAnchor: Double,
-                segmentSeconds: Double = 60, onActivity: @escaping @Sendable (AudioActivityReading?) -> Void = { _ in }, metadata: @escaping @Sendable () -> (String?, String) = { (nil, "{}") }) {
+                segmentSeconds: Double = 60, onActivity: @escaping @Sendable (AudioActivityReading?) -> Void = { _ in }, finishingContext: @escaping @Sendable () -> String = { "{}" }, metadata: @escaping @Sendable () -> (String?, String) = { (nil, "{}") }) {
         self.database = database; self.source = source; self.sessionID = sessionID
-        self.onActivity = onActivity
+        self.onActivity = onActivity; self.finishingContext=finishingContext
         self.wallAnchor = wallAnchor; self.hostAnchor = hostAnchor; self.segmentSeconds = segmentSeconds; self.metadata = metadata
     }
 
     public func consume(_ sample: CMSampleBuffer) throws {
+        if let packet=try Self.decodePCM(sample) {try append(packet.buffer,presentationSeconds:packet.presentationSeconds)}
+    }
+    public static func decodePCM(_ sample: CMSampleBuffer) throws -> (buffer:AVAudioPCMBuffer,presentationSeconds:Double)? {
         guard CMSampleBufferDataIsReady(sample), let description = CMSampleBufferGetFormatDescription(sample),
               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(description),
-              let inputFormat = AVAudioFormat(streamDescription: asbd) else { return }
+              let inputFormat = AVAudioFormat(streamDescription: asbd) else { return nil }
         let frames = CMSampleBufferGetNumSamples(sample)
         guard frames > 0, frames <= Int(Int32.max),
-              let buffer = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: AVAudioFrameCount(frames)) else { return }
+              let buffer = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: AVAudioFrameCount(frames)) else { return nil }
         buffer.frameLength = AVAudioFrameCount(frames)
         guard CMSampleBufferCopyPCMDataIntoAudioBufferList(sample, at: 0, frameCount: Int32(frames), into: buffer.mutableAudioBufferList) == noErr else {
             throw CaptureFailure.message("无法读取音频采样")
         }
         let pts = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample))
         guard pts.isFinite else { throw CaptureFailure.message("音频缺少有效时间戳") }
-        try append(buffer, presentationSeconds: pts)
+        return (buffer,pts)
     }
 
     /// Also used by the synthetic-audio harness; exercises the real encoder,
@@ -106,6 +108,7 @@ public final class AudioTrackWriter: @unchecked Sendable {
         let relative = String(finalURL.path.dropFirst(database.root.path.count + 1))
         var context = (segmentContext.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? [:]
         context["audio_activity"] = activity.json
+        if let data=finishingContext().data(using:.utf8),let extra=try JSONSerialization.jsonObject(with:data) as? [String:Any] {context.merge(extra) {_,new in new}}
         let contextJSON = String(decoding: try JSONSerialization.data(withJSONObject: context),as: UTF8.self)
         try database.transaction {
             try database.execute("UPDATE segments SET ended_ms=?,relative_path=?,sha256=?,context_json=?,state='sealed' WHERE id=?",

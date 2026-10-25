@@ -1,0 +1,147 @@
+@preconcurrency import AVFoundation
+import CoreMedia
+import Foundation
+
+/// A bounded, host-clock mixer. Input buffers never become separate files.
+/// All methods run on the capture sink's serial writer queue.
+public final class MixedAudioWriter: @unchecked Sendable {
+    public static let sampleRate = 48_000.0
+    public static let latency = 1.5
+    private static let blockFrames = 960
+    private struct Block {
+        var system = [Float](repeating: 0,count: blockFrames*2)
+        var microphone = [Float](repeating: 0,count: blockFrames)
+        var presence = [UInt8](repeating: 0,count: blockFrames)
+    }
+    private let database: MemoryDatabase
+    private let wall: Date
+    private let host: Double
+    private let sessionID: String
+    private let segmentSeconds: Double
+    private let metadata: @Sendable () -> (String?,String)
+    private var blocks: [Int64:Block] = [:]
+    private var cursor: Int64?
+    private var latest: Int64 = 0
+    private var written = false
+    private var closed = false
+    private var lateFrames: [String:Int64] = [:]
+    private var missingStarts: [String:Int64] = [:]
+    private var sourceFrames: [String:Int64] = [:]
+    private var unavailableFrames: [String:Int64] = [:]
+    private let format = AVAudioFormat(standardFormatWithSampleRate:sampleRate,channels:2)!
+    private lazy var writer = AudioTrackWriter(database:database,source:"mixed",sessionID:sessionID,wallAnchor:wall,hostAnchor:host,segmentSeconds:segmentSeconds,
+        finishingContext: { [weak self] in self?.mixingContext() ?? "{}" },metadata:metadata)
+    public var sealedCount: Int { writer.sealedCount }
+
+    public init(database:MemoryDatabase,sessionID:String,wallAnchor:Date,hostAnchor:Double,segmentSeconds:Double = 60,metadata:@escaping @Sendable () -> (String?,String) = {(nil,"{}")}) {
+        self.database=database;self.sessionID=sessionID;wall=wallAnchor;host=hostAnchor;self.segmentSeconds=segmentSeconds;self.metadata=metadata
+    }
+    public func consume(_ sample:CMSampleBuffer,source:String) throws {
+        if let packet=try AudioTrackWriter.decodePCM(sample) {try append(packet.buffer,source:source,presentationSeconds:packet.presentationSeconds)}
+    }
+    public func append(_ buffer:AVAudioPCMBuffer,source:String,presentationSeconds pts:Double) throws {
+        guard !closed else {return}
+        guard source=="system_audio" || source=="microphone",pts.isFinite,
+              buffer.format.sampleRate>0,buffer.frameLength>0 else {throw CaptureFailure.message("混音输入或时间戳无效")}
+        let rate=buffer.format.sampleRate,frames=Int(buffer.frameLength),channels=Int(buffer.format.channelCount)
+        guard channels>0,channels<=32,Double(frames)/rate<=4,abs(pts-host)<1e9 else {throw CaptureFailure.message("混音输入格式或时间跨度无效")}
+        let start=Int64(ceil((pts-host)*Self.sampleRate-0.001))
+        let end=Int64(ceil((pts-host+Double(frames)/rate)*Self.sampleRate-0.001))
+        guard end>0 else {return} // Samples from before this recording session.
+        if cursor==nil {cursor=max(0,start)}
+        if !written {cursor=min(cursor!,max(0,start))}
+        guard end-(cursor ?? 0)<=Int64(Self.sampleRate*8) else {throw CaptureFailure.message("音频输入时钟偏移过大，已停止以免混错时间")}
+        let first=max(max(0,start),cursor ?? 0)
+        lateFrames[source,default:0] += max(0,min(end,cursor ?? 0)-max(0,start))
+        guard first<end else {return}
+        let bit:UInt8=source=="system_audio" ? 1:2
+        let list=UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+        func value(_ frame:Int,_ channel:Int) throws -> Double {
+            let lane=buffer.format.isInterleaved ? 0:channel
+            let index=buffer.format.isInterleaved ? frame*channels+channel:frame
+            guard lane<list.count,let data=list[lane].mData else {throw CaptureFailure.message("混音输入数据缺失")}
+            let sample:Double
+            switch buffer.format.commonFormat {
+            case .pcmFormatFloat32:sample=Double(data.assumingMemoryBound(to:Float.self)[index])
+            case .pcmFormatFloat64:sample=data.assumingMemoryBound(to:Double.self)[index]
+            case .pcmFormatInt16:sample=Double(data.assumingMemoryBound(to:Int16.self)[index])/32768
+            case .pcmFormatInt32:sample=Double(data.assumingMemoryBound(to:Int32.self)[index])/2147483648
+            default:throw CaptureFailure.message("混音暂不支持此 PCM 格式")
+            }
+            return sample.isFinite ? min(1,max(-1,sample)):0
+        }
+        var index=first
+        while index<end {
+            let key=index/Int64(Self.blockFrames),offset=Int(index%Int64(Self.blockFrames))
+            let count=min(Int(end-index),Self.blockFrames-offset)
+            var block=blocks[key] ?? Block()
+            for n in 0..<count {
+                let position=max(0,(Double(index+Int64(n))/Self.sampleRate-(pts-host))*rate)
+                let left=min(frames-1,Int(position)),right=min(frames-1,left+1),fraction=min(1,position-Double(left))
+                func resampled(_ channel:Int) throws -> Float {
+                    let a=try value(left,channel),b=try value(right,channel)
+                    return Float(a+(b-a)*fraction)
+                }
+                if bit==1 {
+                    // Keep system left/right spatial content; both final channels also receive microphone.
+                    block.system[(offset+n)*2]=try resampled(0)
+                    block.system[(offset+n)*2+1]=try resampled(channels>1 ? 1:0)
+                } else {
+                    var mono:Float=0
+                    for channel in 0..<channels {mono += try resampled(channel)}
+                    block.microphone[offset+n]=mono/Float(channels)
+                }
+                block.presence[offset+n] |= bit
+            }
+            blocks[key]=block;index += Int64(count)
+        }
+        sourceFrames[source,default:0] += end-first
+        latest=max(latest,end)
+    }
+
+    /// Release frames only after the jitter window; absent inputs are zero, never time-compressed.
+    public func flush(throughHostSeconds cutoff:Double) throws {
+        guard !closed,let start=cursor,cutoff.isFinite else {return}
+        let end=Int64(floor((cutoff-host)*Self.sampleRate+0.001))
+        guard end>start else {return}
+        guard end-start<=Int64(Self.sampleRate*30) else {throw CaptureFailure.message("混音写入延迟过大，已停止以保留缺口信息")}
+        var position=start
+        while position<end {
+            let count=min(4800,Int(end-position))
+            guard let buffer=AVAudioPCMBuffer(pcmFormat:format,frameCapacity:AVAudioFrameCount(count)) else {throw CaptureFailure.message("无法分配混音缓冲")}
+            buffer.frameLength=AVAudioFrameCount(count)
+            for n in 0..<count {
+                let frame=position+Int64(n),key=frame/Int64(Self.blockFrames),offset=Int(frame%Int64(Self.blockFrames))
+                let block=blocks[key]
+                buffer.floatChannelData![0][n]=0.5*(block?.system[offset*2] ?? 0)+0.5*(block?.microphone[offset] ?? 0)
+                buffer.floatChannelData![1][n]=0.5*(block?.system[offset*2+1] ?? 0)+0.5*(block?.microphone[offset] ?? 0)
+                let mask=block?.presence[offset] ?? 0
+                for (source,bit) in [("system_audio",UInt8(1)),("microphone",UInt8(2))] {
+                    if mask&bit==0 {unavailableFrames[source,default:0] += 1;if missingStarts[source]==nil {missingStarts[source]=frame}}
+                    else if let missing=missingStarts.removeValue(forKey:source) {try gap(source:source,start:missing,end:frame)}
+                }
+                if offset==Self.blockFrames-1 {blocks.removeValue(forKey:key)}
+            }
+            try writer.append(buffer,presentationSeconds:host+Double(position)/Self.sampleRate)
+            written=true;position += Int64(count);cursor=position
+        }
+    }
+    public func finish(throughHostSeconds cutoff:Double? = nil) throws {
+        guard !closed else {return}
+        if cursor != nil {
+            let end=max(latest,max(cursor ?? 0,cutoff.map {Int64(floor(($0-host)*Self.sampleRate))} ?? latest))
+            try flush(throughHostSeconds:host+Double(end)/Self.sampleRate)
+            for (source,start) in missingStarts {try gap(source:source,start:start,end:end)}
+        }
+        try writer.finish();closed=true;blocks.removeAll();missingStarts.removeAll()
+        try database.execute("INSERT INTO meta VALUES ('mixed_input_stats',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[mixingContext()])
+    }
+    private func gap(source:String,start:Int64,end:Int64) throws {
+        guard end-start>=480 else {return} // Persist gaps >=10 ms; every absent frame remains in cumulative statistics.
+        try database.addGap(started:wall.addingTimeInterval(Double(start)/Self.sampleRate),ended:wall.addingTimeInterval(Double(end)/Self.sampleRate),source:source,reason:"mixed_input_no_samples")
+    }
+    private func mixingContext() -> String {
+        let value:[String:Any] = ["recording_mode":"mixed","inputs":["system_audio","microphone"],"mixing":["sample_rate":Self.sampleRate,"channels":2,"system_gain":0.5,"microphone_gain":0.5,"jitter_buffer_seconds":Self.latency,"late_frames":lateFrames,"input_frames":sourceFrames,"unavailable_input_frames":unavailableFrames,"statistics_scope":"session_cumulative","resampling":"host_timestamp_linear","echo_cancellation":false]]
+        return (try? JSONSerialization.data(withJSONObject:value,options:[.sortedKeys])).map {String(decoding:$0,as:UTF8.self)} ?? "{}"
+    }
+}

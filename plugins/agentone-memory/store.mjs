@@ -33,7 +33,12 @@ export class MemoryStore {
     this.db = new DatabaseSync(database);
     chmodSync(database, 0o600);
     this.db.exec(readFileSync(new URL('./schema.sql', import.meta.url), 'utf8'));
-    assert(this.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value === '1', 'Unsupported Memory schema');
+    if(this.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value==='1') {
+      try {this.db.exec(readFileSync(new URL('./migrate-v2.sql',import.meta.url),'utf8'));}
+      catch(error){try{this.db.exec('ROLLBACK')}catch{}try{this.db.exec('PRAGMA foreign_keys=ON')}catch{}throw error;}
+      assert(this.db.prepare('PRAGMA foreign_key_check').all().length===0,'Memory migration broke source relations');
+    }
+    assert(this.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value === '2', 'Unsupported Memory schema');
   }
   close() { this.db.close(); }
   transaction(body) {
@@ -66,6 +71,7 @@ export class MemoryStore {
     const tracks = this.db.prepare("SELECT source,COUNT(*) segments,MIN(started_ms) earliest_ms,MAX(ended_ms) latest_ms,SUM(ended_ms-started_ms) recorded_ms FROM segments WHERE state='sealed' GROUP BY source").all();
     return {
       capture: capture ? { state: capture.state === 'recording' && !fresh ? 'offline' : capture.state, detail: capture.detail, last_heartbeat: iso(capture.heartbeat_ms) } : { state: 'not_started' },
+      mixing: this.db.prepare("SELECT value FROM meta WHERE key='mixed_input_stats'").get()?.value ? JSON.parse(this.db.prepare("SELECT value FROM meta WHERE key='mixed_input_stats'").get().value) : null,
       local_asr: this.db.prepare("SELECT value FROM meta WHERE key='local_asr_status'").get()?.value ?? 'not_reported',
       time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       tracks: tracks.map(x => ({ ...x, earliest: iso(x.earliest_ms), latest: iso(x.latest_ms) })),

@@ -28,40 +28,55 @@ private struct OwnedAudioPacket: @unchecked Sendable {
 
 private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     let queue = DispatchQueue(label: "life.agentone.audio-writer", qos: .utility)
-    let system: AudioTrackWriter
-    let microphone: AudioTrackWriter
+    let mixed: MixedAudioWriter
+    let activity: CaptureActivityMeter
     let onFailure: @Sendable (String) -> Void
+    private var timer: DispatchSourceTimer?
     private var failed = false
     init(database: MemoryDatabase, metadata: CaptureMetadata, activity: CaptureActivityMeter, onFailure: @escaping @Sendable (String) -> Void) {
-        let sessionID = UUID().uuidString
         let host = CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()))
-        let wall = Date()
-        system = AudioTrackWriter(database: database, source: "system_audio", sessionID: sessionID, wallAnchor: wall, hostAnchor: host, onActivity: { activity.observe($0,source: "system_audio") }, metadata: { metadata.snapshot() })
-        microphone = AudioTrackWriter(database: database, source: "microphone", sessionID: sessionID, wallAnchor: wall, hostAnchor: host, onActivity: { activity.observe($0,source: "microphone") }, metadata: { metadata.snapshot() })
-        self.onFailure = onFailure
+        mixed = MixedAudioWriter(database:database,sessionID:UUID().uuidString,wallAnchor:Date(),hostAnchor:host,metadata:{metadata.snapshot()})
+        self.activity=activity;self.onFailure=onFailure
+    }
+    func beginMixing() {
+        queue.async {
+            guard !self.failed else {return}
+            let timer=DispatchSource.makeTimerSource(queue:self.queue)
+            timer.schedule(deadline:.now(),repeating:.milliseconds(100),leeway:.milliseconds(15))
+            timer.setEventHandler { [weak self] in
+                guard let self,!self.failed else {return}
+                do {try self.mixed.flush(throughHostSeconds:CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()))-MixedAudioWriter.latency)}
+                catch {self.failed=true;self.onFailure("混合录音已停止："+error.localizedDescription)}
+            }
+            self.timer=timer;timer.resume()
+        }
     }
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard !failed else { return }
+        guard !failed,type == .audio else {return}
         do {
-            if type == .audio { try system.consume(sampleBuffer) }
-            else if #available(macOS 15, *), type == .microphone { try microphone.consume(sampleBuffer) }
-        } catch { failed = true; onFailure("音频保存失败，录音已停止。请检查磁盘空间和 Memory 路径。") }
+            if let packet=try AudioTrackWriter.decodePCM(sampleBuffer) {
+                activity.observe(AudioActivityReading.measure(packet.buffer),source:"system_audio")
+                try mixed.append(packet.buffer,source:"system_audio",presentationSeconds:packet.presentationSeconds)
+            }
+        } catch {failed=true;onFailure("系统声音混音失败："+error.localizedDescription)}
     }
     func enqueueMicrophone(_ buffer: AVAudioPCMBuffer, presentationSeconds: Double) {
-        // AVFoundation buffers are owned copies; all writer access stays on this queue.
-        let packet = OwnedAudioPacket(buffer: buffer,presentationSeconds: presentationSeconds)
+        let packet=OwnedAudioPacket(buffer:buffer,presentationSeconds:presentationSeconds)
         queue.async {
-            guard !self.failed else { return }
-            do { try self.microphone.append(packet.buffer,presentationSeconds: packet.presentationSeconds) }
-            catch { self.failed = true; self.onFailure("麦克风保存失败，录音已停止。请检查磁盘空间。") }
+            guard !self.failed else {return}
+            do {
+                self.activity.observe(AudioActivityReading.measure(packet.buffer),source:"microphone")
+                try self.mixed.append(packet.buffer,source:"microphone",presentationSeconds:packet.presentationSeconds)
+            } catch {self.failed=true;self.onFailure("麦克风混音失败："+error.localizedDescription)}
         }
     }
     func stream(_ stream: SCStream, didStopWithError error: Error) { onFailure("系统音频流已中断，请检查设备或系统授权后继续。") }
     func finish() async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             queue.async {
-                self.failed = true // Late callbacks cannot reopen a sealed track.
-                do { try self.system.finish(); try self.microphone.finish(); continuation.resume() }
+                self.failed = true
+                self.timer?.cancel();self.timer=nil
+                do { try self.mixed.finish(throughHostSeconds:CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()))); continuation.resume() }
                 catch { continuation.resume(throwing: error) }
             }
         }
@@ -125,9 +140,10 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             })
             microphoneInput = microphone
             try microphone.start()
+            output.beginMixing()
             try database.execute("UPDATE coverage SET ended_ms=? WHERE ended_ms IS NULL", [MemoryDatabase.now])
             isRecording = true
-            try database.setCaptureState("recording", detail: "system_audio+microphone")
+            try database.setCaptureState("recording", detail: "mixed(system_audio+microphone)")
         } catch {
             isRecording = false
             microphoneInput?.stop(); microphoneInput = nil
@@ -166,7 +182,7 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
 
     public func heartbeat() throws {
         guard isRecording else { return }
-        try database.setCaptureState("recording", detail: "system_audio+microphone")
+        try database.setCaptureState("recording", detail: "mixed(system_audio+microphone)")
     }
 
     private func releaseLock() {

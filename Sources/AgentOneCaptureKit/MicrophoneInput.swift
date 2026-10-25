@@ -8,7 +8,7 @@ private struct MicrophonePacket: @unchecked Sendable {
 }
 
 /// Keep microphone input independent of ScreenCaptureKit's system-audio stream.
-/// Both writers use the CoreAudio host clock and the same session/wall anchor.
+/// Both inputs use the CoreAudio host clock before a single mixed stream is saved.
 @MainActor final class MicrophoneInput {
     private let engine = AVAudioEngine()
     private var installed = false

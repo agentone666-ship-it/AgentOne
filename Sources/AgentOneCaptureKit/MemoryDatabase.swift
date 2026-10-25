@@ -40,7 +40,13 @@ public final class MemoryDatabase: @unchecked Sendable {
             throw CaptureFailure.message("缺少 Memory schema")
         }
         try executeScript(String(contentsOf: schema, encoding: .utf8))
-        guard try rows("SELECT value FROM meta WHERE key='schema_version'").first?["value"] == "1" else {
+        if try rows("SELECT value FROM meta WHERE key='schema_version'").first?["value"] == "1" {
+            guard let migration=Bundle.module.url(forResource:"migrate-v2",withExtension:"sql") else {throw CaptureFailure.message("缺少混音数据升级脚本")}
+            do {try executeScript(String(contentsOf:migration,encoding:.utf8))}
+            catch {try? executeScript("ROLLBACK");try? executeScript("PRAGMA foreign_keys=ON");throw error}
+            guard try rows("PRAGMA foreign_key_check").isEmpty else {throw CaptureFailure.message("混音数据升级关系校验失败")}
+        }
+        guard try rows("SELECT value FROM meta WHERE key='schema_version'").first?["value"] == "2" else {
             throw CaptureFailure.message("Memory schema 版本不兼容")
         }
     }

@@ -15,38 +15,36 @@ import Foundation
         let database = try MemoryDatabase(root: root)
         let host = CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()))
         let wall = Date(timeIntervalSince1970: 1_761_480_000)
-        for (source,channels) in [("system_audio",2),("microphone",1)] {
-            let writer = AudioTrackWriter(database: database,source: source,sessionID: "synthetic-dual-track",wallAnchor: wall,hostAnchor: host,segmentSeconds: 1,metadata: { ("合成测试地点", "{\"synthetic\":true}") })
-            let format = AVAudioFormat(standardFormatWithSampleRate: 48_000,channels: AVAudioChannelCount(channels))!
-            for index in 0..<4 {
-                let buffer = AVAudioPCMBuffer(pcmFormat: format,frameCapacity: 24_000)!
-                buffer.frameLength = 24_000
-                for channel in 0..<channels {
-                    for frame in 0..<24_000 {
-                        buffer.floatChannelData![channel][frame] = 0.15 * sin(Float(frame) * 2 * .pi * (source == "microphone" ? 880 : 440) / 48_000)
-                    }
-                }
+        let writer=MixedAudioWriter(database:database,sessionID:"synthetic-mixed",wallAnchor:wall,hostAnchor:host,segmentSeconds:1,metadata:{("合成测试地点","{\"synthetic\":true}")})
+        for index in 0..<4 {
+            for (source,channels,rate) in [("microphone",1,44_100.0),("system_audio",2,48_000.0)] {
+                let format=AVAudioFormat(standardFormatWithSampleRate:rate,channels:AVAudioChannelCount(channels))!
+                let frames=Int(rate*0.5)
+                let buffer=AVAudioPCMBuffer(pcmFormat:format,frameCapacity:AVAudioFrameCount(frames))!
+                buffer.frameLength=AVAudioFrameCount(frames)
+                for channel in 0..<channels {for frame in 0..<frames {buffer.floatChannelData![channel][frame]=0.15*sin(Float(frame)*2 * .pi*(source=="microphone" ? 880:440)/Float(rate))}}
                 var description: CMAudioFormatDescription?
                 guard CMAudioFormatDescriptionCreate(allocator: kCFAllocatorDefault,asbd: format.streamDescription,layoutSize: 0,layout: nil,magicCookieSize: 0,magicCookie: nil,extensions: nil,formatDescriptionOut: &description) == noErr else { throw CaptureFailure.message("合成音频格式失败") }
-                var timing=CMSampleTimingInfo(duration: CMTime(value: 1,timescale: 48_000),presentationTimeStamp: CMTime(seconds: host + Double(index)*0.5,preferredTimescale: 48_000),decodeTimeStamp: .invalid)
+                var timing=CMSampleTimingInfo(duration: CMTime(value: 1,timescale: Int32(rate)),presentationTimeStamp: CMTime(seconds: host + Double(index)*0.5,preferredTimescale: Int32(rate)),decodeTimeStamp: .invalid)
                 var sample: CMSampleBuffer?
                 guard CMSampleBufferCreate(allocator: kCFAllocatorDefault,dataBuffer: nil,dataReady: false,makeDataReadyCallback: nil,refcon: nil,formatDescription: description,sampleCount: Int(buffer.frameLength),sampleTimingEntryCount: 1,sampleTimingArray: &timing,sampleSizeEntryCount: 0,sampleSizeArray: nil,sampleBufferOut: &sample) == noErr,let sample else { throw CaptureFailure.message("合成采样缓冲失败") }
                 guard CMSampleBufferSetDataBufferFromAudioBufferList(sample,blockBufferAllocator: kCFAllocatorDefault,blockBufferMemoryAllocator: kCFAllocatorDefault,flags: 0,bufferList: buffer.audioBufferList) == noErr,
                       CMSampleBufferSetDataReady(sample) == noErr else { throw CaptureFailure.message("合成采样数据失败") }
-                try writer.consume(sample)
+                try writer.consume(sample,source:source)
             }
-            try writer.finish()
-            guard writer.sealedCount == 2 else { throw CaptureFailure.message("切片轮转失败") }
+            try writer.flush(throughHostSeconds:host+Double(index+1)*0.5-0.25)
         }
+        try writer.finish()
+        guard writer.sealedCount==2 else {throw CaptureFailure.message("混音切片轮转失败")}
         let rows = try database.rows("SELECT * FROM segments ORDER BY started_ms,source")
-        guard rows.count == 4, try database.rows("SELECT * FROM jobs WHERE state='pending'").count == 4 else { throw CaptureFailure.message("双路持久化失败") }
+        guard rows.count == 2, try database.rows("SELECT * FROM jobs WHERE state='pending'").count == 2 else { throw CaptureFailure.message("单条混音持久化失败") }
         for row in rows {
             let file = try AVAudioFile(forReading: root.appendingPathComponent(row["relative_path"]!))
             let seconds = Double(file.length) / file.fileFormat.sampleRate
-            guard seconds > 0.9,seconds < 1.2,row["sha256"]?.count == 64,row["state"] == "sealed" else { throw CaptureFailure.message("最终音频文件验证失败") }
+            guard seconds > 0.85,seconds < 1.2,row["sha256"]?.count == 64,row["state"] == "sealed" else { throw CaptureFailure.message("最终音频文件验证失败") }
         }
-        guard rows[0]["started_ms"] == rows[1]["started_ms"], rows[2]["started_ms"] == rows[3]["started_ms"] else { throw CaptureFailure.message("双轨时间对齐失败") }
-        let result: [String:Any] = ["fixture":true,"segments":4,"sources":["system_audio","microphone"],"checks":["real AAC encoding","rotation","separate tracks","shared timestamps","readable final files","source hashes","pending ASR jobs"]]
+        guard rows.allSatisfy({$0["source"]=="mixed"}),rows[0]["ended_ms"]==rows[1]["started_ms"] else {throw CaptureFailure.message("混合时间轴不连续")}
+        let result: [String:Any] = ["fixture":true,"segments":2,"sources":["mixed"],"inputs":["system_audio","microphone"],"checks":["real AAC encoding","rotation","one mixed stream","host-timestamp alignment","different input sample rates","readable final files","source hashes","pending ASR jobs"]]
         print(String(decoding: try JSONSerialization.data(withJSONObject: result,options: [.sortedKeys]),as: UTF8.self))
     }
 }

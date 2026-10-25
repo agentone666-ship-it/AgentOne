@@ -10,11 +10,11 @@ try {
   await client.initialize();
   const status=await client.call('get_capture_status');
   assert.equal(status.capture.state,'not_started');
-  assert.deepEqual(status.tracks.map(x=>x.source).sort(),['microphone','system_audio']);
-  assert.equal(status.tracks.reduce((sum,x)=>sum+x.segments,0),4);
+  assert.deepEqual(status.tracks.map(x=>x.source).sort(),['mixed']);
+  assert.equal(status.tracks.reduce((sum,x)=>sum+x.segments,0),2);
   const fixtures=await client.call('search_memory',{limit:30});
-  assert.equal(fixtures.results.length,4);
-  assert.ok(fixtures.results.every(row=>row.session_id==='synthetic-dual-track' && row.context.synthetic===true),'Interop harness must never run against real personal recordings');
+  assert.equal(fixtures.results.length,2);
+  assert.ok(fixtures.results.every(row=>row.session_id==='synthetic-mixed' && row.context.synthetic===true),'Interop harness must never run against real personal recordings');
   let transcribed=0;
   while(true) {
     const {jobs}=await client.call('claim_analysis_jobs',{owner:'synthetic-interop',stage:'transcribe',limit:3});
@@ -28,13 +28,13 @@ try {
       transcribed++;
     }
   }
-  assert.equal(transcribed,4);
+  assert.equal(transcribed,2);
   const {jobs}=await client.call('claim_analysis_jobs',{owner:'synthetic-interop',stage:'analyze',limit:3});
   const job=jobs[0];assert.ok(job.transcript);
   await client.call('submit_memory_analysis',{job_id:job.job_id,lease_token:job.lease_token,source_sha256:job.source_sha256,
     result:{analysis:{summary:'合成协议测试',tags:['合成测试'],claims:[{kind:'hypothesis',text:'合成原型测试',quote:'合成测试原型',start_ms:0,end_ms:500,certainty:'model_inference',owner:null,due_at:null}]}}});
   const found=await client.call('search_memory',{query:'原型'});
-  assert.equal(found.total_matches,4);
+  assert.equal(found.total_matches,2);
   const evidence=await client.call('get_memory_evidence',{segment_id:job.segment_id});
   assert.equal(evidence.transcript.utterances[0].text,'合成测试原型');
   assert.equal(evidence.analyses[0].claims[0].source_sha256,job.source_sha256);

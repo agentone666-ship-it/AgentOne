@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync,mkdirSync,writeFileSync,rmSync,symlinkSync } from 'node:fs';
+import {DatabaseSync} from 'node:sqlite';
+import { mkdtempSync,mkdirSync,readFileSync,writeFileSync,rmSync,symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -181,4 +182,38 @@ test('two actual MCP processes racing for the same queue never receive the same 
     const ids=results.flatMap(r=>r.jobs.map(j=>j.job_id));
     assert.equal(ids.length,2);assert.equal(new Set(ids).size,2);
   } finally {await Promise.all([a.close(),b.close()]);f.close()}
+});
+
+test('v1 upgrade retains audio, transcript, jobs and foreign keys while allowing one mixed source',()=>{
+ const root=mkdtempSync(join(tmpdir(),'agentone-v1-'));
+ try {
+  const old=new DatabaseSync(join(root,'memory.sqlite'));
+  const schema=readFileSync(new URL('./schema.sql',import.meta.url),'utf8').replace("('schema_version', '2')","('schema_version', '1')").replace("'mixed','system_audio'","'system_audio'");
+  old.exec(schema);
+  old.exec("INSERT INTO segments VALUES ('old','session','microphone',1,1000,'UTC',1,1,'host_clock',48000,1,'Audio/old.m4a','hash','sealed',NULL,'{}',1); INSERT INTO transcripts VALUES ('old',1,'legacy evidence','[]','succeeded','fixture',1); INSERT INTO jobs (id,segment_id,stage,source_hash,state,created_ms,updated_ms) VALUES ('job','old','analyze','hash','pending',1,1)");old.close();
+  const store=new MemoryStore(root);
+  assert.equal(store.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get().value,'2');
+  assert.equal(store.db.prepare("SELECT source FROM segments WHERE id='old'").get().source,'microphone');
+  assert.equal(store.db.prepare("SELECT text FROM transcripts WHERE segment_id='old'").get().text,'legacy evidence');
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM jobs').get().n,1);
+  assert.deepEqual(store.db.prepare('PRAGMA foreign_key_check').all(),[]);
+  assert.equal(store.db.prepare('PRAGMA foreign_keys').get().foreign_keys,1);
+  store.db.exec("INSERT INTO segments VALUES ('new','session','mixed',1000,2000,'UTC',1,1,'host_clock',48000,1,'Audio/new.m4a','newhash','sealed',NULL,'{}',1)");
+  assert.equal(store.search({source:'mixed'}).results.length,1);store.close();
+ }finally{rmSync(root,{recursive:true,force:true})}
+});
+
+test('failed v1 relationship validation rolls the schema upgrade back instead of committing partial data',()=>{
+ const root=mkdtempSync(join(tmpdir(),'agentone-invalid-v1-'));
+ try {
+  const old=new DatabaseSync(join(root,'memory.sqlite'));
+  old.exec(readFileSync(new URL('./schema.sql',import.meta.url),'utf8').replace("('schema_version', '2')","('schema_version', '1')").replace("'mixed','system_audio'","'system_audio'"));
+  old.exec("PRAGMA foreign_keys=OFF; INSERT INTO transcripts VALUES ('missing',1,'orphan','[]','succeeded','fixture',1)");old.close();
+  assert.throws(()=>new MemoryStore(root),/CHECK constraint/);
+  const unchanged=new DatabaseSync(join(root,'memory.sqlite'));
+  assert.equal(unchanged.prepare("SELECT value FROM meta WHERE key='schema_version'").get().value,'1');
+  assert.equal(unchanged.prepare('SELECT COUNT(*) n FROM transcripts').get().n,1);
+  assert.ok(!unchanged.prepare("SELECT sql FROM sqlite_master WHERE name='segments'").get().sql.includes("'mixed'"));
+  unchanged.close();
+ }finally{rmSync(root,{recursive:true,force:true})}
 });

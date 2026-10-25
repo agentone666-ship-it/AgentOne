@@ -38,7 +38,7 @@ fi
 
 plugin_resources="$contents_dir/Resources/agentone-memory"
 mkdir -p "$plugin_resources"
-for resource in server.mjs store.mjs recall.mjs schema.sql README.md; do
+for resource in server.mjs store.mjs recall.mjs schema.sql migrate-v2.sql README.md; do
     cp "$project_dir/plugins/agentone-memory/$resource" "$plugin_resources/$resource"
 done
 
@@ -66,7 +66,7 @@ cat > "$contents_dir/Info.plist" <<'PLIST'
     <key>LSUIElement</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>AgentOne automatically records a separate microphone track for your personal audio memory after you grant permission. You can pause automatic recording from the island.</string>
+    <string>AgentOne automatically mixes microphone input with system audio into one recording for your personal audio memory after you grant permission. You can pause automatic recording from the island.</string>
     <key>NSAudioCaptureUsageDescription</key>
     <string>AgentOne automatically records system audio as local memory after you grant permission. You can pause automatic recording at any time.</string>
     <key>NSSpeechRecognitionUsageDescription</key>

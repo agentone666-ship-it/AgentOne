@@ -8,6 +8,7 @@ struct CapturePersistenceTests {
         let swiftSchema = try String(contentsOf: repo.appendingPathComponent("Sources/AgentOneCaptureKit/Resources/schema.sql"),encoding: .utf8)
         let mcpSchema = try String(contentsOf: repo.appendingPathComponent("plugins/agentone-memory/schema.sql"),encoding: .utf8)
         #expect(swiftSchema == mcpSchema)
+        #expect(try String(contentsOf:repo.appendingPathComponent("Sources/AgentOneCaptureKit/Resources/migrate-v2.sql"),encoding:.utf8) == String(contentsOf:repo.appendingPathComponent("plugins/agentone-memory/migrate-v2.sql"),encoding:.utf8))
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let database = try MemoryDatabase(root: root)

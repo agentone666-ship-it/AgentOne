@@ -2,10 +2,10 @@ PRAGMA busy_timeout = 5000;
 PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-INSERT OR IGNORE INTO meta VALUES ('schema_version', '1');
+INSERT OR IGNORE INTO meta VALUES ('schema_version', '2');
 CREATE TABLE IF NOT EXISTS segments (
   id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
-  source TEXT NOT NULL CHECK(source IN ('system_audio','microphone')),
+  source TEXT NOT NULL CHECK(source IN ('mixed','system_audio','microphone')),
   started_ms INTEGER NOT NULL, ended_ms INTEGER NOT NULL,
   time_zone TEXT NOT NULL, first_pts REAL NOT NULL, host_anchor REAL NOT NULL,
   clock_mapping TEXT NOT NULL, sample_rate REAL NOT NULL, channels INTEGER NOT NULL,

@@ -103,10 +103,21 @@ struct IslandView: View {
                 }
                 Spacer()
             }
-            HStack(spacing: 10) {
-                sourceCard("系统声音",icon: "speaker.wave.2",subtitle: "电脑播放的声音",detected: model.systemHasSound,receiving: model.systemReceiving)
-                sourceCard("麦克风",icon: "mic",subtitle: "身边的对话与声音",detected: model.microphoneHasSound,receiving: model.microphoneReceiving)
-            }
+            VStack(alignment:.leading,spacing:12) {
+                HStack {
+                    Image(systemName:"waveform").font(.system(size:20)).foregroundStyle(accent)
+                    Text("系统声音 ＋ 麦克风").font(.system(size:13,weight:.medium))
+                    Spacer()
+                    Text("合并录音").font(.system(size:10)).foregroundStyle(accent)
+                }
+                Text("保存为一条录音，回放和回忆都在一起。").font(.system(size:11)).foregroundStyle(.white.opacity(0.45))
+                if model.recording {
+                    HStack(spacing:12) {
+                        Label(model.systemReceiving ? "电脑声音已接入" : "等待电脑声音",systemImage:"speaker.wave.2")
+                        Label(model.microphoneReceiving ? "麦克风已接入" : "等待麦克风",systemImage:"mic")
+                    }.font(.system(size:9)).foregroundStyle(.white.opacity(0.4))
+                }
+            }.padding(16).frame(maxWidth:.infinity,alignment:.leading).background(.white.opacity(0.055),in:RoundedRectangle(cornerRadius:16))
             HStack {
                 Label("地点",systemImage: "mappin.and.ellipse").foregroundStyle(.white.opacity(0.4))
                 TextField("添加地点，例如：工位",text: $model.place).textFieldStyle(.plain).onChange(of: model.place) { _,_ in model.updateMetadata() }
@@ -119,13 +130,6 @@ struct IslandView: View {
             Text(model.message).font(.system(size: 10)).foregroundStyle(model.hasError ? .orange : .white.opacity(0.4)).lineLimit(2).fixedSize(horizontal: false,vertical: true)
             Spacer(minLength: 0)
         }
-    }
-    private func sourceCard(_ title: String,icon: String,subtitle: String,detected: Bool,receiving: Bool) -> some View {
-        VStack(alignment: .leading,spacing: 8) {
-            HStack { Image(systemName: icon).font(.system(size: 17)).foregroundStyle(model.recording ? accent : .white.opacity(0.65)); Spacer(); Text(model.recording ? (!receiving ? "等待输入" : detected ? "检测到声音" : "安静 · 持续保存") : "待授权 / 暂停").font(.system(size: 9)).foregroundStyle(.white.opacity(0.35)) }
-            Text(title).font(.system(size: 12,weight: .medium))
-            Text(subtitle).font(.system(size: 10)).foregroundStyle(.white.opacity(0.35))
-        }.frame(maxWidth: .infinity,alignment: .leading).padding(14).background(.white.opacity(0.055),in: RoundedRectangle(cornerRadius: 16))
     }
     private var recallPage: some View {
         VStack(spacing:12) {
@@ -184,7 +188,7 @@ struct IslandView: View {
                         VStack(alignment: .leading,spacing: 7) {
                             HStack {
                                 Text(time(row["started_ms"])).monospacedDigit()
-                                Text(row["source"] == "microphone" ? "麦克风" : "系统音").foregroundStyle(.white.opacity(0.4))
+                                Text(row["source"] == "mixed" ? "混合录音" : row["source"] == "microphone" ? "历史麦克风" : "历史系统音").foregroundStyle(.white.opacity(0.4))
                                 if let place = row["place"], !place.isEmpty { Text(place).foregroundStyle(.white.opacity(0.4)) }
                                 Spacer()
                                 if row["state"] == "sealed" { Button("原音") { model.openAudio(row) }.buttonStyle(.plain).foregroundStyle(accent) }
@@ -208,7 +212,7 @@ struct IslandView: View {
                     Text(model.eventCaptureStatus).font(.system(size:10)).foregroundStyle(.white.opacity(0.4))
                     Button("检查事件详情权限") {model.eventService?.requestDetailsPermission()}.font(.system(size:10))
                     Toggle("自动记录声音",isOn: Binding(get: {model.automaticRecording},set: {model.setAutomaticRecording($0)}))
-                    Text("授权后自动连续记录并检测声音；不丢弃安静片段。手动暂停后保持暂停。").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
+                    Text("授权后自动合并记录电脑声音和麦克风；不丢弃安静片段。手动暂停后保持暂停。").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
                     Toggle("登录后自动启动",isOn: Binding(get: {model.autoResume},set: {model.setAutoResume($0)}))
                     HStack {
                         Text(model.loginStatus).font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))

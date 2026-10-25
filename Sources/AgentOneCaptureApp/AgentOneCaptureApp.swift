@@ -15,7 +15,7 @@ import SwiftUI
     @Published var recording = false
     @Published var busy = false
     @Published var hasError = false
-    @Published var message = "自动记录会在系统授权后开始；声音、安静片段都会保留"
+    @Published var message = "自动合并电脑声音与麦克风；声音和安静片段都会保留"
     @Published var automaticRecording = (UserDefaults.standard.object(forKey: "vNext.automaticRecording") as? Bool) ?? true
     @Published var systemReceiving = false
     @Published var microphoneReceiving = false
@@ -138,7 +138,7 @@ import SwiftUI
             hasError = false
             UserDefaults.standard.set(true, forKey: "vNext.captureConsent")
             UserDefaults.standard.set(true, forKey: "vNext.captureDesired")
-            message = automaticRecording ? "自动连续保存两路原音，不因安静而丢弃；可随时暂停" : "两路分别保存 · 原音访问需单独开启"
+            message = automaticRecording ? "自动保存一条混合录音，安静片段也保留；可随时暂停" : "系统音与麦克风合并保存 · 原音访问需单独开启"
         } catch {
             hasError = true
             if !automaticRecording { desiredRecording = false; UserDefaults.standard.set(false,forKey: "vNext.captureDesired") }
@@ -362,10 +362,10 @@ import SwiftUI
                 let root=FileManager.default.temporaryDirectory.appendingPathComponent("agentone-self-check-\(UUID().uuidString)")
                 do {
                     let database=try MemoryDatabase(root: root)
-                    guard try database.rows("SELECT value FROM meta WHERE key='schema_version'").first?["value"] == "1" else { throw CaptureFailure.message("schema unavailable") }
+                    guard try database.rows("SELECT value FROM meta WHERE key='schema_version'").first?["value"] == "2" else { throw CaptureFailure.message("schema unavailable") }
                 }
                 try FileManager.default.removeItem(at: root)
-                print("{\"product\":\"AgentOne Capture\",\"agent_runtime\":false,\"schema\":1,\"sources\":[\"system_audio\",\"microphone\"],\"recording_started\":false}")
+                print("{\"product\":\"AgentOne Capture\",\"agent_runtime\":false,\"schema\":2,\"recording_output\":\"mixed\",\"sources\":[\"system_audio\",\"microphone\"],\"recording_started\":false}")
                 Darwin.exit(0)
             } catch { fputs("Capture self-check failed\n",stderr); Darwin.exit(1) }
         }
