@@ -1,3 +1,5 @@
+> v0.2 的默认产物已切换为 Capture App＋通用 MCP，不再打包 Pi Runtime；历史 Sidecar 测试仍作为迁移回归。新 App 打包无需 Deno，产品版本以根目录 VERSION 为准。
+
 # GitHub 开发、验证与发布
 
 ## 日常开发
@@ -14,8 +16,8 @@ bash scripts/ci.sh all
 ```
 
 也可以单独执行 `runtime`、`swift`、`integration`、`package`。
-`npm test` 会先构建生产 Sidecar，保证从干净 checkout 运行真实 JSONL 进程测试。
-Node 本地版本见 `.nvmrc`，Deno 见 `.deno-version`；macOS CI 固定 Xcode 16.4 / Swift 6.1。
+迁移期保留的 `npm test` 会先构建历史生产 Sidecar，保证从干净 checkout 运行真实 JSONL 进程测试。
+Node 本地版本见 `.nvmrc`；macOS CI 固定 Xcode 16.4 / Swift 6.1。
 
 ## 自动化门禁
 
@@ -25,9 +27,9 @@ Node 本地版本见 `.nvmrc`，Deno 见 `.deno-version`；macOS CI 固定 Xcode
 | 检查 | 验证内容 | 环境 |
 | --- | --- | --- |
 | Workflow lint | actionlint、共享 Bash 入口语法 | Ubuntu |
-| Runtime | 生产构建、TS 单测、JSONL 子进程、localhost 模型协议、Memory MCP 跨月检索 | Node 22.19（支持下限）与 Node 24 |
+| Runtime | 生产构建、TS 单测、JSONL 子进程、localhost 模型协议、旧 Memory MCP、新通用 MCP 与跨月检索 | Node 22.19（支持下限）与 Node 24 |
 | Dependency audit | 已知 high/critical 生产依赖问题阻断 | Node 24 |
-| macOS tests and package | Swift 单测、合成图像 OCR、5 个 Harness、Release 打包、签名与内嵌 Sidecar 黑盒 E2E | macOS 15 / arm64 |
+| macOS tests and package | Swift 单测、合成图像 OCR、5 个历史 Harness、原生音频 Harness、MCP 互通、Release 打包和无 Agent Runtime 的 ZIP 检查 | macOS 15 / arm64 |
 | all checks passed | 所有上述检查必须成功，失败或跳过都不能变绿 | Ubuntu |
 
 Actions 默认只有 `contents: read`；checkout 不保留 Git 凭证。
@@ -53,12 +55,12 @@ Dependabot 每周检查 Actions 和 npm 依赖；Pi 两个包成组升级后仍�
 
 ## 预发布流程
 
-1. 更新 `AgentOneLifeRuntime/package.json` 和锁文件中的版本，通过 PR 合入 main。
+1. 更新仓库根目录 `VERSION` 中的产品版本，通过 PR 合入 main。
    `build_app.sh` 自动将产品版本写入 `CFBundleShortVersionString`；构建号可通过
    `AGENTONE_BUILD_NUMBER` 设置，默认 `1`。
 2. 维护者在 main 的目标提交上创建并推送 `vX.Y.Z` 标签。
 3. 在 Actions 选择 `Release preview`，选择该 tag，手动执行。
-4. 流程检查 tag 与 package.json 版本一致、提交属于 main，然后重新运行完整 CI。
+4. 流程检查 tag 与 VERSION 一致、提交属于 main，然后重新运行完整 CI。
 5. 发布任务只下载该次 CI 已验证的 ZIP，并核对 SHA256；不再次构建。
    仅该任务具有 `contents: write`，并通过 `release-preview` environment。
 6. 生成 **draft + prerelease**。维护者检查后决定是否公开；不会自动覆盖已有 release。

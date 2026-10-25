@@ -5,7 +5,7 @@
 - 基线：`b800d10`，前置 [CI/CD PR #1](https://github.com/agentone666-ship-it/AgentOne/pull/1) 仍待合并。
 - 本轮独立分支：`codex/island-memory-design`。
 - 已完成：现有代码审查、长期记忆一手资料调研、PRD / 数据契约、交互设计。
-- 新录音服务、ASR、静默标签、长期语义检索、宿主接入和原生灵动岛：尚未实现 / 验收。
+- 这是设计阶段快照；用户选择后的实现与验证以 [STATUS_CAPTURE_MEMORY](STATUS_CAPTURE_MEMORY.md) 为准。
 - 本轮没有开启麦克风、系统音采集或定位，没有向云模型发送真实用户数据。
 
 ## DECISIONS
@@ -106,5 +106,5 @@
 
 - 主需求：[PRD_ISLAND_AUDIO_MEMORY.md](PRD_ISLAND_AUDIO_MEMORY.md)。
 - Schema 为未来实现提供可校验的核心对象示例，不是已上线 API；SQL / 音频容器 / 宿主适配仍需实现。
-- 两个待定产品输入：录音来源、首个宿主 Agent。回答前不做宿主安装或设备录音授权。
+- 用户已确认双路独立音频、通用 MCP；没有安装特定宿主或自动开启设备录音。
 - 这个设计分支不混入 PR #1；在接口与默认行为确认后进入实现分支。
