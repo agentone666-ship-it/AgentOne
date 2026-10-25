@@ -279,10 +279,8 @@ private struct IslandView: View {
     }
 }
 
-private final class IslandPanel: NSPanel { override var canBecomeKey: Bool { true } }
-
 @MainActor final class CaptureAppDelegate: NSObject, NSApplicationDelegate {
-    private var panel: NSPanel?
+    private var island: IslandWindowController?
     private var subscription: AnyCancellable?
     private var screenObserver: NSObjectProtocol?
     private var stopping = false
@@ -290,20 +288,19 @@ private final class IslandPanel: NSPanel { override var canBecomeKey: Bool { tru
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         let model = CaptureModel.shared
-        let panel = IslandPanel(contentRect: .zero,styleMask: [.borderless,.nonactivatingPanel],backing: .buffered,defer: false)
-        panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
-        panel.hidesOnDeactivate = false; panel.isReleasedWhenClosed = false
-        panel.level = .floating; panel.collectionBehavior = [.canJoinAllSpaces,.fullScreenAuxiliary,.stationary]
-        panel.contentView = NSHostingView(rootView: IslandView(model: model))
-        self.panel = panel
-        subscription = model.$expanded.sink { [weak self] expanded in Task { @MainActor in self?.position(expanded: expanded) } }
-        screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,object: nil,queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.position(expanded: CaptureModel.shared.expanded) }
+        let island = IslandWindowController(content: AnyView(IslandView(model: model)))
+        self.island = island
+        subscription = model.$expanded.removeDuplicates().sink { [weak self] expanded in
+            Task { @MainActor in self?.island?.position(expanded: expanded) }
         }
-        position(expanded: model.expanded); panel.orderFrontRegardless(); model.launch()
+        screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,object: nil,queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.island?.position(expanded: CaptureModel.shared.expanded) }
+        }
+        island.show(expanded: model.expanded)
+        model.launch()
         if model.demo,let path = ProcessInfo.processInfo.environment["AGENTONE_CAPTURE_PREVIEW_PATH"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                if let view=panel.contentView,let bitmap=view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                if let view=island.panel.contentView,let bitmap=view.bitmapImageRepForCachingDisplay(in: view.bounds) {
                     view.cacheDisplay(in: view.bounds,to: bitmap)
                     try? bitmap.representation(using: .png,properties: [:])?.write(to: URL(fileURLWithPath: path))
                 }
@@ -311,10 +308,9 @@ private final class IslandPanel: NSPanel { override var canBecomeKey: Bool { tru
             }
         }
     }
-    private func position(expanded: Bool) {
-        guard let panel,let screen=NSScreen.main else { return }
-        let size=NSSize(width: expanded ? 420 : 240,height: expanded ? min(560,screen.visibleFrame.height - 20) : 42)
-        panel.setFrame(NSRect(x: screen.visibleFrame.midX-size.width/2,y: screen.visibleFrame.maxY-size.height-6,width: size.width,height: size.height),display: true,animate: false)
+    func expandIsland() {
+        CaptureModel.shared.expanded = true
+        island?.show(expanded: true)
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if readyToExit { return .terminateNow }
@@ -347,7 +343,7 @@ private final class IslandPanel: NSPanel { override var canBecomeKey: Bool { tru
     }
     var body: some Scene {
         MenuBarExtra("AgentOne",systemImage: "waveform.circle") {
-            Button("展开灵动岛") { CaptureModel.shared.expanded = true }
+            Button("展开灵动岛") { delegate.expandIsland() }
             Button("暂停录音") { CaptureModel.shared.pauseRecording() }
             Divider()
             Button("退出 AgentOne") { NSApp.terminate(nil) }

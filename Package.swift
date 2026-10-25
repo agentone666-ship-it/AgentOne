@@ -23,6 +23,7 @@ let package = Package(
         .executableTarget(name: "AgentOneCaptureApp", dependencies: ["AgentOneCaptureKit"]),
         .executableTarget(name: "AgentOneAudioHarness", dependencies: ["AgentOneCaptureKit"]),
         .testTarget(name: "AgentOneCaptureKitTests", dependencies: ["AgentOneCaptureKit"]),
+        .testTarget(name: "AgentOneIslandTests", dependencies: ["AgentOneCaptureApp"]),
         .target(name: "AgentOneCore"),
         .target(name: "AgentOneModelAuth"),
         .target(
