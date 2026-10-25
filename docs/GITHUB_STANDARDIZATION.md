@@ -5,7 +5,8 @@
 - 起始本地版本：`0612cf1`，工作区干净。
 - GitHub `origin/main`：`e2461fe`，比本地少一笔 Memory 功能提交（30 个文件）。
 - CI/CD 改动在 `codex/github-ci-cd`；本地全量验证通过。
-- 远端同步范围等待确认；尚未推送、合并或运行新的 GitHub CI。
+- 用户已确认以当前本地项目为准；已有 Memory 提交和独立 CI/CD 提交均已推送主题分支。
+- PR 云端 CI 和 main 分支保护正在验证，尚未合并。
 - 尚未公开发布任何安装包。
 
 ## DECISIONS
@@ -46,6 +47,6 @@
 ## HANDOFF
 
 - 入口与日常操作：[CI_CD.md](CI_CD.md)。
-- 待确认同步范围后，推送主题分支并用 PR 验证实际 GitHub CI。
+- 同步范围已确认；通过 PR 验证实际 GitHub CI，并补记运行结果。
 - 远端全绿后配置 main required check 和仓库合并设置，回读确认实际生效。
 - Developer ID、公证、正式升级通道、真实模型质量和系统权限验收仍不在已完成范围内。
