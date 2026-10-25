@@ -4,7 +4,7 @@ import {mkdtempSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {MemoryStore} from './store.mjs';
-import {planRecall} from './recall.mjs';
+import {planRecall,eventDigest} from './recall.mjs';
 import {seed} from '../../benchmarks/recall/seed.mjs';
 const reference={reference_time:'2026-10-25T18:00:00+08:00',time_zone:'Asia/Shanghai'};
 function fixture(){const root=mkdtempSync(join(tmpdir(),'event-recall-'));seed(root);const store=new MemoryStore(root);return {store,close(){store.close();rmSync(root,{recursive:true,force:true})}}}
@@ -77,5 +77,24 @@ test('one continuous all-day capture session does not merge separate conversatio
   const result=f.store.recall({query:'今天早上工位和小周说的事',...reference});
   assert.equal(result.status,'needs_clarification');
   assert.equal(new Set(result.candidates.map(x=>x.episode_id)).size,2);
+ }finally{f.close()}
+});
+
+test('a named nearby window can surface unnamed speech but must require confirmation of the person',()=>{
+ const f=fixture();try {
+  const rows=f.store.db.prepare("SELECT segment_id FROM transcripts WHERE instr(text,'小陈')>0").all();
+  for(const row of rows){
+   const text='一段不含人名的现场谈话';
+   f.store.db.prepare('UPDATE transcripts SET text=?,utterances_json=? WHERE segment_id=?').run(text,JSON.stringify([{start_ms:0,end_ms:55000,text}]),row.segment_id);
+   f.store.db.prepare('UPDATE analyses SET payload_json=? WHERE segment_id=?').run(JSON.stringify({summary:text,tags:[],claims:[]}),row.segment_id);
+  }
+  f.store.db.prepare("UPDATE context_events SET title='小陈 - 项目对话' WHERE id='doc-anchor'").run();
+  const event=f.store.db.prepare("SELECT * FROM context_events WHERE id='doc-anchor'").get();
+  f.store.db.prepare('UPDATE context_events SET source_sha256=? WHERE id=?').run(eventDigest(event),event.id);
+  const result=f.store.recall({query:'今天早上工位和小陈说的事',...reference});
+  assert.equal(result.candidates[0].session_id,'event-anchor');
+  assert.equal(result.status,'needs_clarification');
+  assert.equal(result.candidates[0].matched.speaker_identity_confirmed,false);
+  assert.deepEqual(result.candidates[0].matched.person_mentions,[]);
  }finally{f.close()}
 });

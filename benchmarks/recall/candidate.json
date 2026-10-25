@@ -28,7 +28,7 @@
     "event_link": "2/2",
     "action_contract": "n/a"
   },
-  "latency_p95_ms": 227.62,
+  "latency_p95_ms": 53.81,
   "rows": [
     {
       "id": "exact",
@@ -44,7 +44,7 @@
       "event_link": true,
       "action_contract": true,
       "pass": true,
-      "latency_ms": 52.42,
+      "latency_ms": 53.81,
       "sessions": [
         "design",
         "video"
@@ -64,7 +64,7 @@
       "event_link": true,
       "action_contract": true,
       "pass": true,
-      "latency_ms": 17.15,
+      "latency_ms": 16.83,
       "sessions": [
         "design"
       ]
@@ -83,7 +83,7 @@
       "event_link": true,
       "action_contract": true,
       "pass": true,
-      "latency_ms": 18.98,
+      "latency_ms": 5.9,
       "sessions": [
         "remote"
       ]
@@ -102,7 +102,7 @@
       "event_link": true,
       "action_contract": true,
       "pass": true,
-      "latency_ms": 18.33,
+      "latency_ms": 11.6,
       "sessions": [
         "remote"
       ]
@@ -121,7 +121,7 @@
       "event_link": true,
       "action_contract": true,
       "pass": true,
-      "latency_ms": 12.11,
+      "latency_ms": 14.84,
       "sessions": [
         "evening"
       ]
@@ -140,7 +140,7 @@
       "event_link": true,
       "action_contract": true,
       "pass": true,
-      "latency_ms": 14.65,
+      "latency_ms": 7.77,
       "sessions": [
         "pending"
       ]
@@ -159,7 +159,7 @@
       "event_link": true,
       "action_contract": true,
       "pass": true,
-      "latency_ms": 75.38,
+      "latency_ms": 7.88,
       "sessions": [
         "ambiguous-b",
         "ambiguous-a"
@@ -179,7 +179,7 @@
       "event_link": true,
       "action_contract": true,
       "pass": true,
-      "latency_ms": 56.18,
+      "latency_ms": 7.55,
       "sessions": []
     },
     {
@@ -196,7 +196,7 @@
       "event_link": true,
       "action_contract": true,
       "pass": true,
-      "latency_ms": 22.39,
+      "latency_ms": 13.4,
       "sessions": [
         "cancel"
       ]
@@ -215,7 +215,7 @@
       "event_link": true,
       "action_contract": true,
       "pass": true,
-      "latency_ms": 28.35,
+      "latency_ms": 9.92,
       "sessions": [
         "proposal"
       ]
@@ -234,7 +234,7 @@
       "event_link": true,
       "action_contract": true,
       "pass": true,
-      "latency_ms": 16.88,
+      "latency_ms": 10.59,
       "sessions": [
         "injection"
       ]
@@ -253,7 +253,7 @@
       "event_link": true,
       "action_contract": true,
       "pass": true,
-      "latency_ms": 32.05,
+      "latency_ms": 8.87,
       "sessions": [
         "older"
       ]
@@ -272,7 +272,7 @@
       "event_link": true,
       "action_contract": true,
       "pass": true,
-      "latency_ms": 59.18,
+      "latency_ms": 7.06,
       "sessions": [
         "event-anchor"
       ]
@@ -291,7 +291,7 @@
       "event_link": true,
       "action_contract": true,
       "pass": true,
-      "latency_ms": 227.62,
+      "latency_ms": 10.03,
       "sessions": [
         "design",
         "video"
@@ -311,7 +311,7 @@
       "event_link": true,
       "action_contract": true,
       "pass": true,
-      "latency_ms": 9.48,
+      "latency_ms": 10.98,
       "sessions": [
         "pending"
       ]
@@ -330,7 +330,7 @@
       "event_link": true,
       "action_contract": true,
       "pass": true,
-      "latency_ms": 7.89,
+      "latency_ms": 4.02,
       "sessions": []
     },
     {
@@ -347,7 +347,7 @@
       "event_link": true,
       "action_contract": true,
       "pass": true,
-      "latency_ms": 13.47,
+      "latency_ms": 13.93,
       "sessions": [
         "ny"
       ]
@@ -366,7 +366,7 @@
       "event_link": true,
       "action_contract": true,
       "pass": true,
-      "latency_ms": 8.34,
+      "latency_ms": 15.75,
       "sessions": []
     }
   ]

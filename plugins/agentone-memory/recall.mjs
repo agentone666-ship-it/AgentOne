@@ -81,11 +81,11 @@ export function recallContext(store,args) {
  for(const r of rows) {
   const text=norm([r.text,r.payload_json].filter(Boolean).join(' ')),content=topic(text),people=person(text);
   const linked=scoredEvents.filter(e=>e.started_ms<=r.ended_ms+120000&&e.ended_ms>=r.started_ms-120000);
-  const eventScore=linked.length?Math.max(...linked.map(e=>e.content.score))*0.75:0;
+  const eventScore=linked.length?Math.max(...linked.map(e=>e.content.score*0.75+e.people.length*6)):0;
   const place=!!plan.place_hint&&norm(r.place).includes(norm(plan.place_hint));
   const pending=r.transcript_revision===null;
   const topical=terms.length>0&&(content.ratio>=0.4||linked.some(e=>e.content.ratio>=0.4));
-  const eligible=topical||(people.length>0&&(terms.length===0||content.hits.length>0))||(terms.length===0&&plan.people.length===0&&!!plan.time_window&&(place||!plan.place_hint))||(pending&&!!plan.time_window&&place&&plan.people.length===0);
+  const eligible=topical||(inTime(r)&&linked.some(e=>e.people.length>0))||(people.length>0&&(terms.length===0||content.hits.length>0))||(terms.length===0&&plan.people.length===0&&!!plan.time_window&&(place||!plan.place_hint))||(pending&&!!plan.time_window&&place&&plan.people.length===0);
   if(!eligible) continue;
   if(!sessionEnd.has(r.session_id)||r.started_ms-sessionEnd.get(r.session_id)>180000||r.started_ms-(clusterStart.get(r.session_id)??0)>480000) {sessionCluster.set(r.session_id,`${r.session_id}:${r.started_ms}`);clusterStart.set(r.session_id,r.started_ms);}
   sessionEnd.set(r.session_id,Math.max(sessionEnd.get(r.session_id)??0,r.ended_ms));
