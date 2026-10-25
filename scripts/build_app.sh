@@ -38,7 +38,7 @@ fi
 
 plugin_resources="$contents_dir/Resources/agentone-memory"
 mkdir -p "$plugin_resources"
-for resource in server.mjs store.mjs schema.sql README.md; do
+for resource in server.mjs store.mjs recall.mjs schema.sql README.md; do
     cp "$project_dir/plugins/agentone-memory/$resource" "$plugin_resources/$resource"
 done
 

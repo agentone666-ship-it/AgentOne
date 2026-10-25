@@ -120,3 +120,13 @@ private struct TapInvocation: @unchecked Sendable {
         #expect(abs(result.hostSeconds-host) < 0.001)
     }
 }
+
+struct SpeechFailureTests {
+    @Test func onlyDocumentedUnrecognizedSpeechIsEmptyAndServiceFailuresStayFailures() {
+        #expect(OnDeviceSpeechFailure.noRecognizedSpeech(domain:"kAFAssistantErrorDomain",code:1110))
+        #expect(!OnDeviceSpeechFailure.noRecognizedSpeech(domain:"kAFAssistantErrorDomain",code:1101))
+        #expect(!OnDeviceSpeechFailure.noRecognizedSpeech(domain:"kLSRErrorDomain",code:1110))
+        #expect(OnDeviceSpeechFailure.message(domain:"kLSRErrorDomain",code:102).contains("未安装"))
+        #expect(OnDeviceSpeechFailure.message(domain:"kLSRErrorDomain",code:201).contains("听写"))
+    }
+}

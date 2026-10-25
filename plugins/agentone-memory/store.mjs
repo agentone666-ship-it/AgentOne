@@ -1,3 +1,4 @@
+import {recallContext,contextBundle,contextEvent} from './recall.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, lstatSync, chmodSync } from 'node:fs';
@@ -65,9 +66,11 @@ export class MemoryStore {
     const tracks = this.db.prepare("SELECT source,COUNT(*) segments,MIN(started_ms) earliest_ms,MAX(ended_ms) latest_ms,SUM(ended_ms-started_ms) recorded_ms FROM segments WHERE state='sealed' GROUP BY source").all();
     return {
       capture: capture ? { state: capture.state === 'recording' && !fresh ? 'offline' : capture.state, detail: capture.detail, last_heartbeat: iso(capture.heartbeat_ms) } : { state: 'not_started' },
+      local_asr: this.db.prepare("SELECT value FROM meta WHERE key='local_asr_status'").get()?.value ?? 'not_reported',
       time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       tracks: tracks.map(x => ({ ...x, earliest: iso(x.earliest_ms), latest: iso(x.latest_ms) })),
       jobs: this.db.prepare('SELECT stage,state,COUNT(*) count FROM jobs GROUP BY stage,state').all(),
+      context_events: this.db.prepare('SELECT provenance,COUNT(*) count FROM context_events WHERE hidden=0 GROUP BY provenance').all(),
       incomplete_segments: this.db.prepare("SELECT COUNT(*) count FROM segments WHERE state='incomplete'").get().count,
       long_term_memories: this.db.prepare("SELECT status,COUNT(*) count FROM memories GROUP BY status").all(),
       recent_gaps: this.db.prepare('SELECT * FROM coverage ORDER BY started_ms DESC LIMIT 30').all(),
@@ -75,6 +78,9 @@ export class MemoryStore {
       note: 'No Agent runtime is embedded. Native on-device ASR and host-driven labeling are separate stages. Offline hosts leave work queued. Place labels are user annotations, not measured coordinates.'
     };
   }
+  recall(args) { return recallContext(this,args); }
+  bundle(args) { return contextBundle(this,args); }
+  event(args) { return contextEvent(this,args); }
   search(args) {
     const clauses = ["s.state='sealed'"];
     const parameters = [];

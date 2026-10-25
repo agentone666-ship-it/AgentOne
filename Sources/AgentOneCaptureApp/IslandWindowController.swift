@@ -131,7 +131,8 @@ struct IslandHoverState {
     }
 
     func show(expanded: Bool, screen: NSScreen? = IslandWindowController.targetScreen) {
-        holdUntil = ProcessInfo.processInfo.systemUptime + 1.2
+        // Explicit opening also serves keyboard/accessibility navigation; hover keeps its 600 ms exit delay.
+        holdUntil = expanded ? ProcessInfo.processInfo.systemUptime + 8 : 0
         hover.reset()
         position(expanded: expanded,screen: screen)
         panel.orderFrontRegardless()

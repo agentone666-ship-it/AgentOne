@@ -6,7 +6,9 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 runtime() {
     npm --prefix AgentOneLifeRuntime test
     node plugins/personal-context-memory/test.mjs
-    node --test plugins/agentone-memory/test.mjs
+    node --test plugins/agentone-memory/test.mjs plugins/agentone-memory/recall.test.mjs
+    mkdir -p build/benchmarks
+    node benchmarks/recall/run.mjs --check --output build/benchmarks/recall-candidate.json
 }
 
 swift_tests() {

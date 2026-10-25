@@ -3,8 +3,8 @@ import Foundation
 /// One local privacy boundary shared by Accessibility, OCR and model routing.
 /// Discussion *about* passwords or API keys is allowed; actual credential-like
 /// material and protected system surfaces are not.
-enum SensitiveContextPolicy {
-    static func isProtectedSurface(
+public enum SensitiveContextPolicy {
+    public static func isProtectedSurface(
         bundleIdentifier: String?,
         windowTitle: String?,
         focusedRole: String? = nil
@@ -20,7 +20,7 @@ enum SensitiveContextPolicy {
         return protectedSurfaceTerms.contains { haystack.contains($0) }
     }
 
-    static func containsActualSecret(_ values: String?...) -> Bool {
+    public static func containsActualSecret(_ values: String?...) -> Bool {
         let text = values
             .compactMap { $0 }
             .joined(separator: "\n")

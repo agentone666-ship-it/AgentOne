@@ -1,6 +1,15 @@
 import Foundation
 @preconcurrency import Speech
 
+public enum OnDeviceSpeechFailure {
+    public static func noRecognizedSpeech(domain: String,code: Int) -> Bool {domain == "kAFAssistantErrorDomain" && code == 1110}
+    public static func message(domain: String,code: Int) -> String {
+        if domain == "kLSRErrorDomain",code == 102 {return "本机中文识别模型未安装（102）"}
+        if domain == "kLSRErrorDomain",code == 201 {return "系统听写未开启（201）"}
+        return "本机识别失败（\(domain.prefix(100)) \(code)）"
+    }
+}
+
 public struct AudioUtterance: Codable, Sendable {
     public let start_ms: Int
     public let end_ms: Int
@@ -25,8 +34,9 @@ public struct AudioUtterance: Codable, Sendable {
         _ = try? database.execute("UPDATE jobs SET state='pending',lease_token=NULL,lease_until_ms=NULL WHERE state='leased' AND lease_owner=?",[ownerID])
     }
     public func requestAuthorization() async -> Bool {
+        status = "等待系统语音识别授权"
         let result = await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0 == .authorized) }
+            SFSpeechRecognizer.requestAuthorization { @Sendable status in continuation.resume(returning: status == .authorized) }
         }
         enabled = result
         status = result ? "本机转写已启用" : "语音识别未授权，片段仍保留在队列"
@@ -35,11 +45,17 @@ public struct AudioUtterance: Codable, Sendable {
 
     public func runNext() async {
         guard enabled, !running else { return }
-        guard SFSpeechRecognizer.authorizationStatus() == .authorized,
-              let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier)),
-              recognizer.supportsOnDeviceRecognition, recognizer.isAvailable else {
-            status = "本机识别当前不可用；原音保留，等待 MCP 处理"
-            return
+        guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
+            status="等待系统语音识别授权；原音保留在队列";return
+        }
+        guard let recognizer=SFSpeechRecognizer(locale:Locale(identifier:localeIdentifier)) else {
+            status="系统不支持此转写语言；原音保留在队列";return
+        }
+        guard recognizer.supportsOnDeviceRecognition else {
+            status="本机中文识别模型尚不可用；不会改用云端";return
+        }
+        guard recognizer.isAvailable else {
+            status="本机识别服务暂不可用；原音保留在队列";return
         }
         running = true; defer { running = false }
         let token = UUID().uuidString
@@ -69,7 +85,7 @@ public struct AudioUtterance: Codable, Sendable {
             if let id = job?["id"] {
                 _ = try? database.execute("UPDATE jobs SET state='pending',lease_token=NULL,lease_until_ms=NULL,last_error='local_asr_failed',updated_ms=? WHERE id=? AND lease_token=?", [MemoryDatabase.now,id,token])
             }
-            status = "本机转写失败，原音和待处理任务已保留"
+            status = ((error as? CaptureFailure)?.errorDescription ?? "本机转写失败") + "；原音和待处理任务保留"
         }
     }
 
@@ -79,18 +95,22 @@ public struct AudioUtterance: Codable, Sendable {
         request.shouldReportPartialResults = false
         return try await withCheckedThrowingContinuation { continuation in
             var finished = false
-            recognitionTask = recognizer.recognitionTask(with: request) { result, error in
+            recognitionTask = recognizer.recognitionTask(with: request) { @Sendable result, error in
                 let final = result?.isFinal == true
                 let text = result?.bestTranscription.formattedString ?? ""
                 let utterances = result?.bestTranscription.segments.map { segment in
                     AudioUtterance(start_ms: Int(segment.timestamp * 1000), end_ms: Int((segment.timestamp + segment.duration) * 1000), text: segment.substring, speaker_local_id: nil)
                 } ?? []
                 let failed = error != nil
+                let errorDomain = error.map {($0 as NSError).domain} ?? "unknown"
+                let errorCode = error.map {($0 as NSError).code} ?? 0
+                let unrecognized = OnDeviceSpeechFailure.noRecognizedSpeech(domain:errorDomain,code:errorCode)
                 Task { @MainActor [weak self] in
                     guard !finished, final || failed else { return }
                     finished = true; self?.timeout?.cancel(); self?.timeout = nil
                     if final { continuation.resume(returning: (text,utterances)) }
-                    else { continuation.resume(throwing: CaptureFailure.message("本机转写失败")) }
+                    else if unrecognized { continuation.resume(returning: ("",[])) }
+                    else { continuation.resume(throwing: CaptureFailure.message(OnDeviceSpeechFailure.message(domain:errorDomain,code:errorCode))) }
                     self?.recognitionTask = nil
                 }
             }

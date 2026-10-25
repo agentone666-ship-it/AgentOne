@@ -3,45 +3,65 @@ import ApplicationServices
 import AgentOneCore
 import Foundation
 
-struct ActiveApplicationContext: Sendable {
-    let capturedAt: Date
+public struct ActiveApplicationContext: Sendable {
+    public let capturedAt: Date
     /// The process that owned the AX snapshot at capture time. Return capture
     /// must keep this PID instead of querying the frontmost application again
     /// from an asynchronous ScreenCaptureKit startup task: a system panel or
     /// AgentOne's own floating UI can become frontmost in that small gap.
-    let processIdentifier: pid_t
-    let applicationName: String
-    let bundleIdentifier: String?
-    let windowTitle: String?
-    let windowIdentifier: String?
-    let url: URL?
-    let documentPath: String?
-    let visibleText: String?
-    let selectedText: String?
-    let focusedText: String?
+    public let processIdentifier: pid_t
+    public let applicationName: String
+    public let bundleIdentifier: String?
+    public let windowTitle: String?
+    public let windowIdentifier: String?
+    public let url: URL?
+    public let documentPath: String?
+    public let visibleText: String?
+    public let selectedText: String?
+    public let focusedText: String?
     /// UTF-16 offsets relative to `focusedText`, matching AX/NSString.
-    let focusedSelectionRange: Range<Int>?
-    let focusedRole: String?
+    public let focusedSelectionRange: Range<Int>?
+    public let focusedRole: String?
     /// Global Quartz frame of the focused window. Keeping this beside the
     /// focused control lets Return capture reject a stale click in a sidebar
     /// even when Electron exposes no editable AX role for its composer.
-    let windowFrame: CGRect?
-    let focusedFrame: CGRect?
+    public let windowFrame: CGRect?
+    public let focusedFrame: CGRect?
     /// A small global frame around the AX insertion point/selection. This lets
     /// Return capture reduce large editors and terminal scrollback surfaces to
     /// the paragraph the user was actually submitting.
-    let focusedCaretFrame: CGRect?
-    let isSecureInput: Bool
+    public let focusedCaretFrame: CGRect?
+    public let isSecureInput: Bool
+    public init(capturedAt: Date, processIdentifier: pid_t, applicationName: String, bundleIdentifier: String?, windowTitle: String?, windowIdentifier: String?, url: URL?, documentPath: String?, visibleText: String?, selectedText: String?, focusedText: String?, focusedSelectionRange: Range<Int>?, focusedRole: String?, windowFrame: CGRect?, focusedFrame: CGRect?, focusedCaretFrame: CGRect?, isSecureInput: Bool) {
+        self.capturedAt = capturedAt
+        self.processIdentifier = processIdentifier
+        self.applicationName = applicationName
+        self.bundleIdentifier = bundleIdentifier
+        self.windowTitle = windowTitle
+        self.windowIdentifier = windowIdentifier
+        self.url = url
+        self.documentPath = documentPath
+        self.visibleText = visibleText
+        self.selectedText = selectedText
+        self.focusedText = focusedText
+        self.focusedSelectionRange = focusedSelectionRange
+        self.focusedRole = focusedRole
+        self.windowFrame = windowFrame
+        self.focusedFrame = focusedFrame
+        self.focusedCaretFrame = focusedCaretFrame
+        self.isSecureInput = isSecureInput
+    }
+
 }
 
-struct ActiveInteractionTarget: Sendable {
-    let role: String?
-    let title: String?
-    let value: String?
-    let url: URL?
-    let identifier: String?
+public struct ActiveInteractionTarget: Sendable {
+    public let role: String?
+    public let title: String?
+    public let value: String?
+    public let url: URL?
+    public let identifier: String?
 
-    var summary: String? {
+    public var summary: String? {
         let parts = [
             role.map { $0.replacingOccurrences(of: "AX", with: "") },
             title,
@@ -65,8 +85,8 @@ struct ActiveInteractionTarget: Sendable {
 /// exposes to macOS Accessibility: page/document title, URL, visible text,
 /// selection and the focused editor value. Password fields and their subtrees
 /// are skipped before any value attribute is requested.
-enum ActiveContextReader {
-    enum Scope {
+public enum ActiveContextReader {
+    public enum Scope {
         /// Reads the focused control, its containing window and direct URL
         /// attributes. It deliberately avoids walking the target app's AX tree.
         case focusedElement
@@ -80,7 +100,7 @@ enum ActiveContextReader {
     private static let maximumVisitedElements = 240
     private static let maximumTraversalDepth = 8
 
-    static func read(scope: Scope = .full) -> ActiveApplicationContext? {
+    public static func read(scope: Scope = .full) -> ActiveApplicationContext? {
         guard let application = NSWorkspace.shared.frontmostApplication else { return nil }
         return read(application: application, scope: scope)
     }
@@ -90,7 +110,7 @@ enum ActiveContextReader {
     /// exact WeChat/Feishu/Codex process without allowing the test runner or a
     /// macOS system surface to replace the target between activation and AX
     /// sampling.
-    static func read(
+    public static func read(
         application: NSRunningApplication,
         scope: Scope = .full
     ) -> ActiveApplicationContext? {
@@ -204,7 +224,7 @@ enum ActiveContextReader {
     /// assuming that a left click necessarily navigated. The runtime compares
     /// the surrounding Context after the click before adding navigation
     /// semantics.
-    static func interactionTarget(at quartzPoint: CGPoint) -> ActiveInteractionTarget? {
+    public static func interactionTarget(at quartzPoint: CGPoint) -> ActiveInteractionTarget? {
         guard let application = NSWorkspace.shared.frontmostApplication else { return nil }
         let appElement = AXUIElementCreateApplication(application.processIdentifier)
         var rawElement: AXUIElement?

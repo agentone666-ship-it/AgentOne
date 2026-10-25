@@ -1,3 +1,4 @@
+import AgentOneCaptureKit
 import AppKit
 import Foundation
 import AgentOneCore

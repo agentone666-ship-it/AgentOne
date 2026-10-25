@@ -62,3 +62,12 @@ CREATE TABLE IF NOT EXISTS memory_evidence (
   PRIMARY KEY(memory_id,segment_id,start_ms,end_ms)
 );
 CREATE INDEX IF NOT EXISTS memory_source ON memory_evidence(segment_id);
+-- Additive v1 extension: original Diary files remain immutable sources.
+CREATE TABLE IF NOT EXISTS context_events (
+ id TEXT PRIMARY KEY, started_ms INTEGER NOT NULL, ended_ms INTEGER NOT NULL,
+ kind TEXT NOT NULL, application TEXT, title TEXT, url TEXT, text TEXT NOT NULL,
+ place TEXT, provenance TEXT NOT NULL, source_ref TEXT NOT NULL, source_sha256 TEXT NOT NULL,
+ hidden INTEGER NOT NULL DEFAULT 0, created_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS event_time ON context_events(started_ms,ended_ms);
+CREATE TABLE IF NOT EXISTS event_import_state (source_ref TEXT PRIMARY KEY, sha256 TEXT NOT NULL, synced_ms INTEGER NOT NULL);

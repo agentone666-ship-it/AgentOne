@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/agentone666-ship-it/AgentOne/actions/workflows/ci.yml/badge.svg)](https://github.com/agentone666-ship-it/AgentOne/actions/workflows/ci.yml)
 
-你的 Agent 的个人经历记忆：原生灵动岛、双路音频与通用 MCP。
+你的 Agent 的个人经历记忆：灵动岛、双路音频、事件线索与通用 MCP。
 
 </div>
 
@@ -12,7 +12,7 @@ AgentOne v0.2 把电脑上的系统声音和麦克风分别记录在本机，用
 
 ![原生灵动岛，演示态，不采集声音](docs/images/agentone-island-vnext.png)
 
-> 当前是可运行的开发预览。合成音频、MCP 跨进程、数据持久化和实际 ZIP 已验证；真实设备录音、系统授权、本机 ASR 质量、全天连续性与中文多人对话还需验收。截图来自原生 App 的演示模式，没有真实用户录音。
+> 当前是可运行的开发预览。合成音频、MCP 跨进程、数据持久化和实际 ZIP 已验证；短时双路采集、本机转写后查询回读和旧事件导入已有设备烟测；ASR 准确率、全天连续性、中文多人对话和真实宿主执行仍需验收。截图来自原生 App 的演示模式，没有真实用户录音。
 
 ## 核心链路
 
@@ -68,7 +68,13 @@ node scripts/print_mcp_config.mjs '/Applications/AgentOne.app'
 
 默认存储在 `~/Documents/AgentOne Home/Memory`，或现有 Agent Home 的 `Memory` 子目录。
 通过 `AGENTONE_MEMORY_HOME` 指定 Memory 根目录可用于测试和自定义部署。
-旧 Diary 和 [personal-context-memory](plugins/personal-context-memory/README.md) 保留，不会被新版本删除或静默迁移。
+旧 Diary 和 [personal-context-memory](plugins/personal-context-memory/README.md) 保留。新版将可见非敏感活动投影到统一事件索引，不改写或删除原文件；回忆页可切换声音/事件并查看原来源。
+
+## 模糊回忆与 benchmark
+
+通过 `recall_context` 找候选，`get_context_bundle` 取原话和前后文，`get_context_event` 核查事件来源；`recall_and_act` prompt 把有来源的事项交给你的 Agent。附近网页不是录音原话，人名出现不证明说话人身份。
+
+固定合成用例新接口通过 18/18，探索语言挑战仅 2/4；真实转写和宿主推理/执行尚未完成端到端验收。数据卡、较强基线对照和复现命令见 [Recall Benchmark](benchmarks/recall/README.md)。
 
 ## 测试与交付
 
@@ -90,7 +96,7 @@ node --test plugins/agentone-memory/test.mjs
 ## 开发边界
 
 - `Sources/AgentOneCaptureApp`：灵动岛、用户控制与本机生命周期。
-- `Sources/AgentOneCaptureKit`：双路采集、音频封口、SQLite、本机 ASR。
+- `Sources/AgentOneCaptureKit`：双路采集、音频封口、SQLite、本机 ASR、被动事件与旧 Diary 投影。
 - `plugins/agentone-memory`：不绑定宿主的 MCP 与长期记忆数据层。
 - `Sources/AgentOneApp`、`AgentOneLifeRuntime`：v0.1 历史实现，仅保留迁移期回归；开发时可显式运行 `swift run AgentOneLegacy`，默认分发不包含它。
 

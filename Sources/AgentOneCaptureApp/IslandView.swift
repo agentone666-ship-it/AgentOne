@@ -7,6 +7,8 @@ struct IslandView: View {
     @ObservedObject var model: CaptureModel
     var onExpand: (() -> Void)? = nil
     @State private var tab = IslandTab.capture
+    @State private var showEvents = false
+    @State private var expandedEventID: String?
     private let accent = Color(red: 0.55,green: 0.9,blue: 0.84)
     private var status: String { model.demo ? "界面演示" : model.hasError ? "需要留意" : model.recording ? (model.automaticRecording ? "自动记录中" : "记录中") : "未录音" }
     private var tint: Color { model.hasError ? .orange : model.recording ? accent : .white.opacity(0.45) }
@@ -81,7 +83,7 @@ struct IslandView: View {
                 .frame(width: 38,height: 38).background(accent.opacity(0.1),in: RoundedRectangle(cornerRadius: 12))
             VStack(alignment: .leading,spacing: 3) {
                 Text("AgentOne").font(.system(size: 15,weight: .semibold))
-                Text("声音记忆").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
+                Text("声音与事件记忆").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
             }
             Spacer()
             HStack(spacing: 5) { Circle().fill(tint).frame(width: 5,height: 5); Text(status).font(.system(size: 10)) }
@@ -126,6 +128,45 @@ struct IslandView: View {
         }.frame(maxWidth: .infinity,alignment: .leading).padding(14).background(.white.opacity(0.055),in: RoundedRectangle(cornerRadius: 16))
     }
     private var recallPage: some View {
+        VStack(spacing:12) {
+            HStack(spacing:8) {
+                Button {showEvents=false} label: {Text("声音").foregroundStyle(showEvents ? .white.opacity(0.4) : accent)}
+                Button {showEvents=true} label: {Text("事件 · \(model.eventCount)").foregroundStyle(showEvents ? accent : .white.opacity(0.4))}
+                Spacer()
+            }.font(.system(size:11,weight:.medium)).buttonStyle(.plain)
+            if showEvents {eventRecallPage} else {audioRecallPage}
+        }
+    }
+    private var eventRecallPage: some View {
+        VStack(alignment:.leading,spacing:10) {
+            HStack {Text("事件记录").font(.system(size:17,weight:.semibold));Spacer();Button("同步旧记录") {model.syncLegacyEvents()}.font(.system(size:10))}
+            Text(model.eventImportStatus).font(.system(size:10)).foregroundStyle(.white.opacity(0.4))
+            TextField("搜索网页、应用或原话",text:$model.query).textFieldStyle(.plain).font(.system(size:12)).padding(10).background(.white.opacity(0.055),in:RoundedRectangle(cornerRadius:10)).onChange(of:model.query) {_,_ in model.refresh()}
+            ScrollView {
+                VStack(alignment:.leading,spacing:10) {
+                    if model.eventRows.isEmpty {Text("旧 Diary 与新事件会出现在这里；没有权限时只保留应用切换。").font(.system(size:11)).foregroundStyle(.white.opacity(0.4)).padding(.vertical,25)}
+                    ForEach(model.eventRows,id: \.["id"]) {row in
+                        VStack(alignment:.leading,spacing:6) {
+                            HStack {
+                                Text(time(row["started_ms"])).monospacedDigit()
+                                Text(row["application"] ?? "应用未知").foregroundStyle(.white.opacity(0.45))
+                                Spacer()
+                                Text(row["provenance"]=="legacy_diary" ? "旧记录" : "现场事件").foregroundStyle(accent.opacity(0.7))
+                            }.font(.system(size:9))
+                            Text(row["title"] ?? row["kind"] ?? "事件").font(.system(size:12,weight:.medium)).lineLimit(2)
+                            Text(row["text"] ?? "").font(.system(size:10)).foregroundStyle(.white.opacity(0.6)).lineLimit(expandedEventID==row["id"] ? nil : 3).textSelection(.enabled)
+                            HStack {
+                                Button(expandedEventID==row["id"] ? "收起原文" : "展开原文") {expandedEventID=expandedEventID==row["id"] ? nil : row["id"]}
+                                Spacer()
+                                if row["provenance"]=="legacy_diary" {Button("原记录") {model.openEventSource(row)}}
+                            }.font(.system(size:9)).buttonStyle(.plain).foregroundStyle(accent)
+                        }.padding(11).frame(maxWidth:.infinity,alignment:.leading).background(.white.opacity(0.05),in:RoundedRectangle(cornerRadius:12))
+                    }
+                }
+            }.frame(maxHeight:.infinity)
+        }
+    }
+    private var audioRecallPage: some View {
         VStack(alignment: .leading,spacing: 12) {
             HStack { Text("最近的声音").font(.system(size: 17,weight: .semibold)); Spacer(); Text("\(model.pending) 项待分析").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4)) }
             HStack { Image(systemName: "magnifyingglass").foregroundStyle(.white.opacity(0.4)); TextField("搜索原话、主题或地点",text: $model.query).textFieldStyle(.plain).onChange(of: model.query) { _,_ in model.refresh() } }
@@ -163,6 +204,9 @@ struct IslandView: View {
             VStack(alignment: .leading,spacing: 16) {
                 Text("记录偏好").font(.system(size: 17,weight: .semibold))
                 VStack(alignment: .leading,spacing: 14) {
+                    Toggle("记录应用、网页和交互事件",isOn:Binding(get:{model.eventCaptureEnabled},set:{model.setEventCapture($0)}))
+                    Text(model.eventCaptureStatus).font(.system(size:10)).foregroundStyle(.white.opacity(0.4))
+                    Button("检查事件详情权限") {model.eventService?.requestDetailsPermission()}.font(.system(size:10))
                     Toggle("自动记录声音",isOn: Binding(get: {model.automaticRecording},set: {model.setAutomaticRecording($0)}))
                     Text("授权后自动连续记录并检测声音；不丢弃安静片段。手动暂停后保持暂停。").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
                     Toggle("登录后自动启动",isOn: Binding(get: {model.autoResume},set: {model.setAutoResume($0)}))

@@ -27,6 +27,11 @@ import SwiftUI
     @Published var pauseOnLock = (UserDefaults.standard.object(forKey: "vNext.pauseOnLock") as? Bool) ?? true
     @Published var query = ""
     @Published var rows: [[String: String]] = []
+    @Published var eventRows: [[String: String]] = []
+    @Published var eventCount = 0
+    @Published var eventImportStatus = "旧事件待同步"
+    @Published var eventCaptureEnabled = (UserDefaults.standard.object(forKey: "vNext.contextEvents") as? Bool) ?? true
+    @Published var eventCaptureStatus = "事件记录未启动"
     @Published var pending = 0
     @Published var asrStatus = "本机转写未启用"
     @Published var localASR = UserDefaults.standard.bool(forKey: "vNext.localASR")
@@ -34,6 +39,7 @@ import SwiftUI
     let demo = ProcessInfo.processInfo.environment["AGENTONE_CAPTURE_DEMO"] == "1"
     let database: MemoryDatabase?
     let service: AudioCaptureService?
+    let eventService: EventCaptureService?
     let worker: LocalTranscriptionWorker?
     private var desiredRecording = false
     private var sleeping = false
@@ -47,6 +53,7 @@ import SwiftUI
         let db = try? MemoryDatabase(root: root)
         database = db
         service = db.map { AudioCaptureService(database: $0) }
+        eventService = db.map { EventCaptureService(database: $0) }
         worker = db.map { LocalTranscriptionWorker(database: $0) }
         if db == nil { message = "Memory 目录无法打开；录音不会启动。" }
         service?.onFailure = { [weak self] message in
@@ -56,6 +63,7 @@ import SwiftUI
             if !self.automaticRecording { self.desiredRecording = false; UserDefaults.standard.set(false,forKey: "vNext.captureDesired") }
             Task { await self.stop(reason: "stream_error"); self.message = message }
         }
+        eventService?.place = { [weak self] in self?.place }
         worker?.enabled = localASR
         audioExport = (try? db?.rows("SELECT value FROM meta WHERE key='allow_audio_export'").first?["value"]) == "1"
     }
@@ -84,12 +92,15 @@ import SwiftUI
                 do { try await Task.sleep(for: .seconds(3)) } catch { return }
             }
         }
+        syncLegacyEvents()
+        if localASR && SFSpeechRecognizer.authorizationStatus() == .notDetermined {enableASR()}
         if autoResume { setAutoResume(true) }
         switch AutomaticCapturePolicy.startup(enabled: automaticRecording,
                 desired: UserDefaults.standard.object(forKey: "vNext.captureDesired") as? Bool,
                 setupAttempted: UserDefaults.standard.bool(forKey: "vNext.permissionSetupAttempted"), demo: demo) {
         case .start(let prompts):
             desiredRecording = true
+            if eventCaptureEnabled { eventService?.start() }
             if prompts { UserDefaults.standard.set(true,forKey: "vNext.permissionSetupAttempted") }
             Task { await start(prompts: prompts) }
         case .paused: message = "自动记录已手动暂停；点击恢复后继续"
@@ -123,6 +134,7 @@ import SwiftUI
             try await service.start(allowPermissionPrompts: prompts)
             if suspended || !desiredRecording { try await service.stop(reason: "start_cancelled"); return }
             recording = service.isRecording
+            if eventCaptureEnabled { eventService?.start() }
             hasError = false
             UserDefaults.standard.set(true, forKey: "vNext.captureConsent")
             UserDefaults.standard.set(true, forKey: "vNext.captureDesired")
@@ -137,6 +149,7 @@ import SwiftUI
     }
 
     func stop(reason: String) async {
+        eventService?.stop()
         do { try await service?.stop(reason: reason) }
         catch { message = "录音已停止，但末段封口失败；原文件保留为待恢复" }
         recording = false
@@ -159,6 +172,30 @@ import SwiftUI
         if desiredRecording && !suspended { await start(prompts: false) }
     }
 
+    func setEventCapture(_ value: Bool) {
+        guard !demo else {return}
+        eventCaptureEnabled=value;UserDefaults.standard.set(value,forKey: "vNext.contextEvents")
+        if value && desiredRecording && !suspended {eventService?.start()} else {eventService?.stop()}
+        refresh()
+    }
+    func syncLegacyEvents() {
+        guard !demo,let database else {return}
+        eventImportStatus="正在同步旧事件…"
+        Task {
+            do {
+                let report=try await Task.detached(priority:.utility) {try LegacyEventImporter(database:database).sync(diaryRoot:database.root.deletingLastPathComponent().appendingPathComponent("Diary"))}.value
+                eventImportStatus="已同步 \(report.imported) 条旧事件" + (report.skippedFiles+report.malformedEntries>0 ? "（部分来源无法读取）" : "")
+            } catch {eventImportStatus="旧事件同步失败，原 Diary 保留"}
+            refresh()
+        }
+    }
+    func openEventSource(_ row: [String:String]) {
+        guard let database,let ref=row["source_ref"],ref.hasPrefix("Diary/Daily/") else {return}
+        let relative=String(ref.split(separator:"#").first ?? "")
+        let url=database.root.deletingLastPathComponent().appendingPathComponent(relative).resolvingSymlinksInPath()
+        guard url.path.hasPrefix(database.root.deletingLastPathComponent().appendingPathComponent("Diary/Daily").resolvingSymlinksInPath().path+"/") else {return}
+        NSWorkspace.shared.open(url)
+    }
     func updateMetadata() {
         guard !demo else { return }
         UserDefaults.standard.set(place, forKey: "vNext.place")
@@ -221,6 +258,10 @@ import SwiftUI
         systemHasSound = recording && (service?.activity.hasSound(source: "system_audio") ?? false)
         microphoneHasSound = recording && (service?.activity.hasSound(source: "microphone") ?? false)
         do {
+            try database.execute("INSERT INTO meta VALUES ('local_asr_status',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[worker?.status ?? "本机转写不可用"])
+            eventCaptureStatus=eventService?.status ?? "事件服务不可用"
+            eventCount=Int(try database.rows("SELECT COUNT(*) AS count FROM context_events WHERE hidden=0").first?["count"] ?? "0") ?? 0
+            eventRows=try database.rows("SELECT * FROM context_events WHERE hidden=0 AND (?='' OR instr(lower(COALESCE(title,'')||text||COALESCE(application,'')||COALESCE(url,'')),lower(?))>0) ORDER BY started_ms DESC LIMIT 30",[query,query])
             pending = Int(try database.rows("SELECT COUNT(*) AS count FROM jobs WHERE state IN ('pending','leased')").first?["count"] ?? "0") ?? 0
             let sql = """
             SELECT s.*,t.text,a.payload_json FROM segments s

@@ -19,7 +19,7 @@ let package = Package(
         .executable(name: "AgentOnePiIntegrationHarness", targets: ["AgentOnePiIntegrationHarness"])
     ],
     targets: [
-        .target(name: "AgentOneCaptureKit", resources: [.process("Resources")]),
+        .target(name: "AgentOneCaptureKit", dependencies: ["AgentOneCore"], resources: [.process("Resources")]),
         .executableTarget(name: "AgentOneCaptureApp", dependencies: ["AgentOneCaptureKit"]),
         .executableTarget(name: "AgentOneAudioHarness", dependencies: ["AgentOneCaptureKit"]),
         .testTarget(name: "AgentOneCaptureKitTests", dependencies: ["AgentOneCaptureKit"]),
@@ -44,7 +44,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "AgentOneApp",
-            dependencies: ["AgentOneCore", "AgentOneModelRuntime", "AgentOneModelAuth", "AgentOneCredentialStore", "AgentOnePiRuntime"],
+            dependencies: ["AgentOneCore", "AgentOneCaptureKit", "AgentOneModelRuntime", "AgentOneModelAuth", "AgentOneCredentialStore", "AgentOnePiRuntime"],
             exclude: [
                 "PiRuntime",
                 "ModelRuntime/ModelInference.swift",
