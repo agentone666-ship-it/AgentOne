@@ -21,13 +21,13 @@ AgentOne 为这类需求保留现场：电脑声音与麦克风混成一条录�
 ## 现在的界面
 
 <p align="center">
-  <img src="docs/images/island-record.png" alt="灵动岛记录页：系统声音与麦克风合并为一条录音，支持地点标注和暂停" width="440" />
-  <img src="docs/images/island-recall.png" alt="灵动岛回忆页：搜索声音、查看转写和标签、回放原音" width="440" />
+  <img src="docs/images/island-record.png" alt="灵动岛记录页：系统声音与麦克风合并为一条录音，支持地点标注和暂停" width="48%" />
+  <img src="docs/images/island-recall.png" alt="灵动岛回忆页：搜索声音、查看转写和标签、回放原音" width="48%" />
 </p>
 
 <p align="center">
-  <img src="docs/images/island-events.png" alt="灵动岛事件页：统一查看旧 Diary 与新的现场活动线索" width="440" />
-  <img src="docs/images/island-settings.png" alt="灵动岛设置页：自动记录、登录启动、锁屏暂停、本机转写与原音访问" width="440" />
+  <img src="docs/images/island-events.png" alt="灵动岛事件页：统一查看旧 Diary 与新的现场活动线索" width="48%" />
+  <img src="docs/images/island-settings.png" alt="灵动岛设置页：自动记录、登录启动、锁屏暂停、本机转写与原音访问" width="48%" />
 </p>
 
 以上图片由当前原生 SwiftUI 界面离屏渲染，使用明确标注的演示数据，不含真实录音、转写或电脑活动。演示中的地点与对话不代表实际记录。

@@ -19,7 +19,7 @@
 ## TESTS
 
 - 当前 SwiftUI 源码成功编译并离屏渲染；逐图检查布局与演示标识。
-- 检查 Markdown 链接、图片资源与 Git diff 格式。
+- 检查 Markdown 链接、图片资源与 Git diff 格式；GitHub 页面确认四图加载，使用百分比宽度保持两列。
 - PR 经过仓库既有 CI 门禁后合入；文档不声称功能分支已经合入 main。
 
 ## HANDOFF
