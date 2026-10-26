@@ -17,11 +17,11 @@
 
 ## TESTS
 
-- 136 项 Swift 测试通过，包含模型 wait/nil/NaN 不停录、模型切片前后时间连续、无 automatic_wait 省略、标签不完成宿主任务、来源更正/失败不写旧标签、删除派生内容、低分和无识别语音标记。
+- 137 项 Swift 测试通过，包含模型 wait/nil/NaN 不停录、模型切片前后时间连续、无 automatic_wait 省略、标签不完成宿主任务、来源更正/失败不写旧标签、删除派生内容、低分和无识别语音标记。
 - 21 项通用 MCP 测试通过，覆盖预览标签检索、自动地点来源和来源证据；AAC→SQLite→真实 MCP 子进程 interop、签名 Release ZIP 验证通过。
 - 真机静置至少 4 个连续约 60 秒片段：均 sealed、原文件哈希正确、continuous_preservation、真实 core_location 证据齐全、后台 asr_no_speech 预览生成，automatic_wait 数量为 0；Laya 为 wait/unknown 时仍持续保存。正常退出/重开后状态为 recording，心跳更新，原音继续落盘。
 - 本机缓存 Laya 的活动/主题 JSONL 协议均已真实运行；输入为合成文本，不能证明真实会议分类准确率。合成检索 benchmark 18/18，仍不代表真实 ASR 或会议召回。
-- 登录自启存在独立限制：App 的 SMAppService 状态返回不可用，重新注册未成功；尝试系统设置添加当前正式路径后，UI 回读超时/窗口不可用，未确认登录项写入。偏好保留开启，但未用真实注销/登录证明自启，不宣称已修复系统登录启动。应用正常重开的自动录音已验证。
+- 登录自启：App 的 SMAppService 状态返回不可用，重新注册未成功；随后通过系统设置添加当前正式路径，最终 UI 回读确认 AgentOne 已在“登录时打开”列表中。偏好保留开启，但未实际注销/登录验收。应用正常重开的自动录音已验证。
 - Laya 原始文本分类能力有限；预览标签不作为确定事实，长期记忆与待办仍需 Agent 核对来源。
 
 ## MAIN SYNC
@@ -33,3 +33,10 @@
 最终逐来源检查发现本次运行的 input_frames 只有 system_audio，不能把文件 source=mixed 或连续落盘当成麦克风已接入的证明。系统日志在启动时有音频设备切换，可能导致 AVAudioEngine 停止；尚无证据把之前会议漏录完全归因为这一个原因。[Apple 配置变化说明](https://developer.apple.com/documentation/foundation/nsnotification/name-swift.struct/avaudioengineconfigurationchange) 描述了硬件通道/采样率变化可停止引擎。
 
 增加按实际采样回调检查的恢复策略：缺采样约 6 秒后在主线程重建麦克风引擎，最多连续 3 次；有效采样恢复后重置预算，静音 PCM 也算健康。恢复期间电脑声音持续保存；仍失败时橙色提示，不冒充完整双输入，原有覆盖缺口记录继续保留。回归包含重试边界、冷却和成功重置；新安装后真机 UI 同时显示两路已接入、自动记录中；封口的约 60 秒混合文件中 system_audio 与 microphone 均有实际帧、双声道 AAC 哈希正确、策略为 continuous_preservation。此前仅电脑声音的片段不冒充完整麦克风记录；本次短测仍不能证明全天稳定或真实会议识别质量。
+
+
+## NATIVE CALLBACK AND FALLBACK FOLLOW-UP
+
+后续重开又出现麦克风缺采样；不把一次双输入短测当成持续稳定的证明。原引擎 3 次恢复失败后仅尝试一次独立的 AVCaptureSession 音频通道，停用原 tap，避免双重混音。通过 session.synchronizationClock 转换到 CoreAudio host clock 后送入原混音器，保存策略和单文件输出不变。仍失败则明确提示，不无限重试或停止电脑声音。短时真机结果与最后 CI 状态另记于 PR #2 的验收记录。
+
+同时发现实际崩溃报告（20:59:18，EXC_BAD_ACCESS）定位到 EventCaptureService.start 的全局鼠标监听回调/Swift executor 检查。全局回调改由非 Actor 的 Sendable 工厂创建，仅将不可变 PassivePointerSignal 交给 MainActor；新增从后台线程实际投递 NSEvent 的回归，137 项 Swift 测试通过。此修复不新增字符采集、权限或 Agent runtime。

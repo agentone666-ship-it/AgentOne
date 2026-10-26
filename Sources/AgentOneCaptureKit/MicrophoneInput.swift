@@ -25,6 +25,8 @@ struct MicrophoneRecoveryPolicy {
     private var engine = AVAudioEngine()
     private var installed = false
     private var recovery:Task<Void,Never>?
+    private var fallback:CaptureSessionMicrophone?
+    private var fallbackAttempted=false
     private let hasSamples:@Sendable () -> Bool
     private let warning:@Sendable (String) -> Void
     private let deliver: @Sendable (AVAudioPCMBuffer,Double) -> Void
@@ -41,12 +43,24 @@ struct MicrophoneRecoveryPolicy {
                 guard let self,!Task.isCancelled else {return}
                 let receiving=self.hasSamples()
                 if receiving {self.warning("")}
+                if self.fallbackAttempted {
+                    if !receiving {self.warning("麦克风仍未收到采样，请检查输入设备；电脑声音继续保存")}
+                    continue
+                }
                 if policy.observe(hasSamples:receiving,now:ProcessInfo.processInfo.systemUptime) {
                     self.warning("麦克风未收到采样，正在自动恢复；电脑声音继续保存")
                     self.stopEngine();self.engine=AVAudioEngine()
                     do {try self.startEngine()} catch {self.warning("麦克风恢复失败；电脑声音继续保存，请检查输入设备")}
                 } else if !receiving,policy.attempts>=3 {
-                    self.warning("麦克风采样中断，已尝试恢复；电脑声音继续保存，请检查输入设备")
+                    if !self.fallbackAttempted {
+                        self.fallbackAttempted=true
+                        self.stopEngine()
+                        do {
+                            let capture=try CaptureSessionMicrophone(deliver:self.deliver,fail:self.fail)
+                            self.fallback=capture;capture.start()
+                            self.warning("正在切换麦克风采集通道；电脑声音继续保存")
+                        } catch {self.warning("麦克风采样中断，请检查输入设备；电脑声音继续保存")}
+                    }
                 }
             }
         }
@@ -63,11 +77,38 @@ struct MicrophoneRecoveryPolicy {
     }
     func stop() {
         recovery?.cancel();recovery=nil
+        fallback?.stop();fallback=nil
         stopEngine()
     }
     private func stopEngine() {
         if installed { engine.inputNode.removeTap(onBus: 0); installed = false }
         engine.stop()
+    }
+}
+
+/// Independent audio-only fallback when the engine's tap never resumes after a route change.
+/// Capture-session timestamps are explicitly converted to the mixer's host clock.
+private final class CaptureSessionMicrophone:NSObject,AVCaptureAudioDataOutputSampleBufferDelegate,@unchecked Sendable {
+    private let session=AVCaptureSession()
+    private let queue=DispatchQueue(label:"life.agentone.microphone-fallback")
+    private let deliver:@Sendable (AVAudioPCMBuffer,Double) -> Void
+    private let fail:@Sendable (String) -> Void
+    init(deliver:@escaping @Sendable (AVAudioPCMBuffer,Double) -> Void,fail:@escaping @Sendable (String) -> Void) throws {
+        self.deliver=deliver;self.fail=fail;super.init()
+        guard let device=AVCaptureDevice.default(for:.audio) else {throw CaptureFailure.message("没有可用麦克风")}
+        let input=try AVCaptureDeviceInput(device:device),output=AVCaptureAudioDataOutput()
+        guard session.canAddInput(input),session.canAddOutput(output) else {throw CaptureFailure.message("麦克风采集通道不可用")}
+        session.beginConfiguration();session.addInput(input);session.addOutput(output);session.commitConfiguration()
+        output.setSampleBufferDelegate(self,queue:queue)
+    }
+    func start() {queue.async {self.session.startRunning()}}
+    func stop() {queue.async {self.session.stopRunning()}}
+    func captureOutput(_ output:AVCaptureOutput,didOutput sampleBuffer:CMSampleBuffer,from connection:AVCaptureConnection) {
+        do {
+            guard let packet=try AudioTrackWriter.decodePCM(sampleBuffer),let clock=session.synchronizationClock else {return}
+            let pts=CMSyncConvertTime(CMSampleBufferGetPresentationTimeStamp(sampleBuffer),from:clock,to:CMClockGetHostTimeClock())
+            deliver(packet.buffer,CMTimeGetSeconds(pts))
+        } catch {fail("麦克风备用通道采样失败："+error.localizedDescription)}
     }
 }
 

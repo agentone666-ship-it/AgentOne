@@ -1,6 +1,15 @@
 import AppKit
 import Foundation
 
+// Construct AppKit's callback outside MainActor. Only the immutable sampled signal
+// crosses to the UI actor; native event delivery has no Swift executor guarantee.
+func makePassivePointerHandler(sampler:PassivePointerEventSampler,deliver:@escaping @Sendable (PassivePointerSignal) -> Void) -> @Sendable (NSEvent) -> Void {
+    { event in
+        guard let signal=sampler.sample(event) else {return}
+        deliver(signal)
+    }
+}
+
 public struct PassivePointerSignal: Sendable {
     public enum Kind: Sendable {
         case primaryClick
