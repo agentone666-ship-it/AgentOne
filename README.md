@@ -85,7 +85,7 @@ swift run AgentOne
 
 ## 本机录音决策
 
-0.2.6 使用 Laya 多语言文本分类器，根据声音活动描述建议保存或听候。只有持续静音、双路输入正常且模型连续两次达到门限，才暂停写文件；听候时保留最近 10 秒混音 PCM 到内存，恢复时补回开头。模型不可用或不确定时继续保存，手动暂停优先。较早的静音不保存，缺口明确记录；模型不读取原音或转写，也不判断人物和谈话内容。
+0.2.8 默认先听候：只有原生输入在最近 3 秒内持续出现明显声音，并且本机 Laya 间隔约 2 秒连续两次确认，才开始写录音文件。未知输入、模型加载/失败或单次声响不会启动录音。已有录音保留静音尾段后回到听候；手动暂停优先，显式手动持续录音仍可使用。听候仍需要麦克风检测，但只保留最近 10 秒混音 PCM 到内存；确认后补回开头，省略区间有覆盖记录。模型不读取原音或转写，也不识别说话人。
 
 首次配置需要 `uv`，将 Python 依赖与约 650 MB 固定权重安装到本机 Application Support。正常启动只使用离线缓存，不运行独立 Agent runtime。
 
@@ -95,7 +95,7 @@ python3 benchmarks/capture/run.py
 python3 benchmarks/capture/run.py --holdout
 ```
 
-模型原始判断在不同措辞保留集仅 4/8，不能单独控制录音。门限与固定用例见 [Capture Benchmark](benchmarks/capture/README.md)，实现和真机证据见 [0.2.6 记录](docs/vnext/LAYA_WAVEFORM_026.md)。
+之前 0.2.6 的模型原始判断在不同措辞保留集仅 4/8，不能单独控制录音；当前采用持续声音证据和稳定启动确认。门限与固定用例见 [Capture Benchmark](benchmarks/capture/README.md)，实现和真机证据见 [0.2.6 记录](docs/vnext/LAYA_WAVEFORM_026.md)。
 
 ## 连接你的 Agent
 

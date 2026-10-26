@@ -70,6 +70,25 @@ struct MixedAudioTests {
         #expect((late["system_audio"] ?? 0)>=4799)
         #expect(try db.rows("SELECT * FROM coverage WHERE source='microphone' AND reason='mixed_input_no_samples'").count==1)
     }
+    @Test func automaticQuietStartupAndUnknownModelDecisionsCreateNoAudioFiles() throws {
+        let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {try? FileManager.default.removeItem(at:root)}
+        let db=try MemoryDatabase(root:root),host=CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()))
+        let status=RecordingDecisionStatus()
+        let mixer=MixedAudioWriter(database:db,sessionID:"quiet-start",wallAnchor:Date(),hostAnchor:host,decisionStatus:status)
+        let silence=try tone(rate:48000,channels:1,seconds:1,frequency:880,amplitude:0)
+        for second in 0..<6 {
+            try mixer.append(silence,source:"microphone",presentationSeconds:host+Double(second))
+            try mixer.flush(throughHostSeconds:host+Double(second+1))
+            try mixer.applyDecision(RecordingDecision(choice:"record",confidence:0.99),quietSeconds:712,inputsReady:false,soundConfirmed:false)
+        }
+        try mixer.finish()
+        #expect(!status.snapshot.saving)
+        #expect(try db.rows("SELECT * FROM segments").isEmpty)
+        #expect(try db.rows("SELECT * FROM jobs").isEmpty)
+        #expect(!FileManager.default.fileExists(atPath:root.appendingPathComponent("Audio").path))
+        #expect(try db.rows("SELECT * FROM coverage WHERE reason='automatic_wait'").count==1)
+    }
     @Test func actualMixedAACRetainsPreRollAndLabelsIntentionalGaps() throws {
         let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer {try? FileManager.default.removeItem(at:root)}
@@ -80,15 +99,21 @@ struct MixedAudioTests {
         for second in 0..<16 {
             try mixer.append(input,source:"microphone",presentationSeconds:host+Double(second))
             try mixer.flush(throughHostSeconds:host+Double(second+1))
+            if second==2 || second==4 {try mixer.applyDecision(RecordingDecision(choice:"record",confidence:0.9),quietSeconds:0,inputsReady:true,soundConfirmed:true)}
         }
-        for _ in 0..<2 {try mixer.applyDecision(RecordingDecision(choice:"wait",confidence:0.95),quietSeconds:20,inputsReady:true)}
+        for _ in 0..<2 {try mixer.applyDecision(RecordingDecision(choice:"wait",confidence:0.95),quietSeconds:20,inputsReady:true,soundConfirmed:false)}
         #expect(!status.snapshot.saving)
         #expect(try db.rows("SELECT * FROM segments").count==1)
-        for second in 16..<31 {
+        for second in 16..<29 {
             try mixer.append(input,source:"microphone",presentationSeconds:host+Double(second))
             try mixer.flush(throughHostSeconds:host+Double(second+1))
         }
-        try mixer.applyDecision(RecordingDecision(choice:"record",confidence:0.6),quietSeconds:0,inputsReady:true)
+        try mixer.applyDecision(RecordingDecision(choice:"record",confidence:0.9),quietSeconds:0,inputsReady:true,soundConfirmed:true)
+        for second in 29..<31 {
+            try mixer.append(input,source:"microphone",presentationSeconds:host+Double(second))
+            try mixer.flush(throughHostSeconds:host+Double(second+1))
+        }
+        try mixer.applyDecision(RecordingDecision(choice:"record",confidence:0.9),quietSeconds:0,inputsReady:true,soundConfirmed:true)
         try mixer.finish()
         let rows=try db.rows("SELECT * FROM segments ORDER BY started_ms")
         #expect(rows.count==2)
@@ -96,7 +121,7 @@ struct MixedAudioTests {
         let file=try AVAudioFile(forReading:db.verifiedAudioURL(try #require(resumed["id"])))
         #expect(abs(Double(file.length)/file.fileFormat.sampleRate-10)<0.06)
         #expect(try db.rows("SELECT * FROM jobs WHERE stage='transcribe'").count==2)
-        let gap=try #require(db.rows("SELECT * FROM coverage WHERE reason='laya_wait'").first)
+        let gap=try #require(db.rows("SELECT * FROM coverage WHERE reason='automatic_wait'").first)
         let duration=(Double(gap["ended_ms"]!)!-Double(gap["started_ms"]!)!)/1000
         #expect(abs(duration-5)<0.01)
     }

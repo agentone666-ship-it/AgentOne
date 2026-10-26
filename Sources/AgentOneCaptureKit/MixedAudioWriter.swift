@@ -36,11 +36,11 @@ public final class MixedAudioWriter: @unchecked Sendable {
     private lazy var gate = decisionStatus.map { status in RecordingGate(status:status,
         write:{[unowned self] buffer,pts in try self.writer.append(buffer,presentationSeconds:pts)},
         seal:{[unowned self] in try self.writer.finish()},
-        gap:{[unowned self] start,end in try self.database.addGap(started:self.wall.addingTimeInterval(start-self.host),ended:self.wall.addingTimeInterval(end-self.host),source:"mixed",reason:"laya_wait")}) }
-    public func applyDecision(_ decision:RecordingDecision?,quietSeconds:Double,inputsReady:Bool) throws {
+        gap:{[unowned self] start,end in try self.database.addGap(started:self.wall.addingTimeInterval(start-self.host),ended:self.wall.addingTimeInterval(end-self.host),source:"mixed",reason:"automatic_wait")}) }
+    public func applyDecision(_ decision:RecordingDecision?,quietSeconds:Double,inputsReady:Bool,soundConfirmed:Bool) throws {
         guard !closed else {return}
         // The last emitted output is behind the device clock by the jitter buffer.
-        try gate?.apply(decision,quietSeconds:quietSeconds,inputsReady:inputsReady,now:host+Double(cursor ?? 0)/Self.sampleRate)
+        try gate?.apply(decision,quietSeconds:quietSeconds,inputsReady:inputsReady,soundConfirmed:soundConfirmed,now:host+Double(cursor ?? 0)/Self.sampleRate)
     }
     public var sealedCount: Int { writer.sealedCount }
 
@@ -164,7 +164,7 @@ public final class MixedAudioWriter: @unchecked Sendable {
         try database.addGap(started:wall.addingTimeInterval(Double(start)/Self.sampleRate),ended:wall.addingTimeInterval(Double(end)/Self.sampleRate),source:source,reason:"mixed_input_no_samples")
     }
     private func mixingContext() -> String {
-        let value:[String:Any] = ["decision_policy":decisionStatus == nil ? "continuous" : "laya_with_retention_fallback","recording_mode":"mixed","inputs":["system_audio","microphone"],"mixing":["sample_rate":Self.sampleRate,"channels":2,"system_gain":0.5,"microphone_gain":0.5,"jitter_buffer_seconds":Self.latency,"late_frames":lateFrames,"input_frames":sourceFrames,"unavailable_input_frames":unavailableFrames,"statistics_scope":"session_cumulative","resampling":"host_timestamp_linear","echo_cancellation":false]]
+        let value:[String:Any] = ["decision_policy":decisionStatus == nil ? "continuous" : decisionStatus!.manual ? "manual_continuous":"laya_with_confirmed_activity","recording_mode":"mixed","inputs":["system_audio","microphone"],"mixing":["sample_rate":Self.sampleRate,"channels":2,"system_gain":0.5,"microphone_gain":0.5,"jitter_buffer_seconds":Self.latency,"late_frames":lateFrames,"input_frames":sourceFrames,"unavailable_input_frames":unavailableFrames,"statistics_scope":"session_cumulative","resampling":"host_timestamp_linear","echo_cancellation":false]]
         return (try? JSONSerialization.data(withJSONObject:value,options:[.sortedKeys])).map {String(decoding:$0,as:UTF8.self)} ?? "{}"
     }
 }

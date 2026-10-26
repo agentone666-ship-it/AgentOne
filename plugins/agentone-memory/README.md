@@ -76,3 +76,5 @@ SQLite 元数据与查询不会只读取最近一天，因此旧记录仍可查�
 0.2.5 新音频 source 为 `mixed`，一个文件对应一份转写和分析任务。`system_audio` / `microphone` 仅继续用于兼容旧历史；支持 source 过滤。共享 schema v2 会原子升级 v1 的来源约束，保留所有旧 ID、哈希、任务和引用。
 
 0.2.7 的新录音在 context_json 保留自动定位来源、坐标、精度、采样时间与可读地址；段内首次获得的位置带 sampled_during_segment 限定。定位是线索，不证明工位、房间或人物在场；历史手动标注仍保留 user_annotation 含义。
+
+0.2.8 自动采集默认先听候，持续声音加模型稳定确认才写盘；未知、加载中或错误不会开启新录音。coverage 的新省略区间为 automatic_wait，历史 laya_wait 保留原义；听候仍需要设备采样与 10 秒内存预录。

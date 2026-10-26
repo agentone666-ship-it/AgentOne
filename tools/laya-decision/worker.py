@@ -6,9 +6,9 @@ import sys
 os.environ.setdefault("USE_TF", "0")
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-QUESTIONS = {"capture": {"type": "choice", "instructions": "判断当前声音状态", "criteria": {
-    "A": "有声音或情况未知，应保存录音",
-    "B": "持续安静，可以暂时听候"}}}
+QUESTIONS = {"capture": {"type": "choice", "instructions": "当前是否有明显且连续的声音？", "criteria": {
+    "A": "已经持续检测到明显声音，可以开始录音",
+    "B": "没有持续的明显声音，静音或者输入未知，继续听候"}}}
 
 
 def main():

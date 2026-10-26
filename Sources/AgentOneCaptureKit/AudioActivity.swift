@@ -32,7 +32,7 @@ public struct AudioActivityReading: Sendable {
     }
 }
 
-/// A volume observation, not a speech/person detector; never gates original audio.
+/// Volume summary for saved audio, not a speech/person detector. Listening gaps are tracked separately.
 public struct AudioActivitySummary: Sendable {
     private(set) var windows = 0
     private(set) var activeWindows = 0
@@ -51,20 +51,43 @@ public struct AudioActivitySummary: Sendable {
     }
 }
 
+public struct CaptureStartEvidence:Sendable {
+    public let inputsReady:Bool
+    public let sustainedSound:Bool
+    public let quietSeconds:Double
+    public let activeFraction:Double
+    public let readySources:[String]
+}
+
 public final class CaptureActivityMeter: @unchecked Sendable {
     private let lock = NSLock()
     private var lastSound: [String: TimeInterval] = [:]
     private var lastSample: [String: TimeInterval] = [:]
     private var readings: [String: (Double,TimeInterval)] = [:]
     private var firstSample: TimeInterval?
+    private var firstNativeSample:TimeInterval?
+    private var lastClearSound:[String:TimeInterval]=[:]
+    private struct Bucket {let slot:Int64;var power:Double;var count:Int}
+    private var buckets:[String:[Bucket]]=[:]
+    private static let startThreshold = -42.0
     public init() {}
     public func observe(_ reading: AudioActivityReading?, source: String, now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
-        guard let reading,reading.rmsDBFS.isFinite else {return}
+        guard let reading,reading.rmsDBFS.isFinite,now.isFinite,now>=0,now<Double(Int64.max)/5 else {return}
         lock.lock(); defer { lock.unlock() }
+        if let last=lastSample[source],now<last {return}
         lastSample[source] = now
         if firstSample == nil { firstSample = now }
         readings[source] = (reading.rmsDBFS,now)
         if reading.hasSound { lastSound[source] = now }
+        if source=="system_audio" || source=="microphone" {
+            if firstNativeSample==nil {firstNativeSample=now}
+            if reading.rmsDBFS>=Self.startThreshold {lastClearSound[source]=now}
+            let slot=Int64(floor(now*5)),power=pow(10,min(0,reading.rmsDBFS)/10)
+            var history=(buckets[source] ?? []).filter {$0.slot>=slot-20}
+            if let last=history.last,last.slot==slot {history[history.count-1].power+=power;history[history.count-1].count+=1}
+            else {history.append(Bucket(slot:slot,power:power,count:1))}
+            buckets[source]=history
+        }
     }
     public func hasSound(source: String, now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
         lock.lock(); defer { lock.unlock() }
@@ -87,5 +110,26 @@ public final class CaptureActivityMeter: @unchecked Sendable {
         let last = lastSound.values.max() ?? firstSample ?? now
         return max(0,now-last)
     }
-    public func reset() { lock.lock(); defer { lock.unlock() }; lastSound.removeAll(); lastSample.removeAll(); readings.removeAll(); firstSample = nil }
+    /// A 3-second native-input window, not a speech classifier. A single loud click is insufficient.
+    public func startEvidence(now:TimeInterval=ProcessInfo.processInfo.systemUptime) -> CaptureStartEvidence {
+        lock.lock();defer {lock.unlock()}
+        guard now.isFinite,now>=0,now<Double(Int64.max)/5 else {return CaptureStartEvidence(inputsReady:false,sustainedSound:false,quietSeconds:0,activeFraction:0,readySources:[])}
+        let slot=Int64(floor(now*5))
+        let ready=["system_audio","microphone"].filter {source in
+            guard let sample=lastSample[source] else {return false};return now>=sample && now-sample<1
+        }
+        var sustained=false,fraction=0.0
+        for source in ready {
+            let window=(buckets[source] ?? []).filter {$0.slot>=slot-14 && $0.slot<=slot}
+            let active=window.filter {10*log10(max($0.power/Double($0.count),1e-16))>=Self.startThreshold}.count
+            let ratio=Double(active)/15
+            fraction=max(fraction,ratio)
+            let span=window.first.map {Double(slot-$0.slot)/5} ?? 0
+            let recent=lastClearSound[source].map {now >= $0 && now-$0<0.8} ?? false
+            if window.count>=13,span>=2.4,ratio>=0.6,recent {sustained=true}
+        }
+        let last=lastClearSound.values.max() ?? firstNativeSample ?? now
+        return CaptureStartEvidence(inputsReady:!ready.isEmpty,sustainedSound:sustained,quietSeconds:max(0,now-last),activeFraction:fraction,readySources:ready)
+    }
+    public func reset() {lock.lock();defer{lock.unlock()};lastSound.removeAll();lastSample.removeAll();readings.removeAll();firstSample=nil;firstNativeSample=nil;lastClearSound.removeAll();buckets.removeAll()}
 }

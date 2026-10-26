@@ -111,7 +111,7 @@ import SwiftUI
         }
         let developmentWorker=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/AgentOne/Laya/laya-worker.py")
         if let workerURL=Bundle.main.url(forResource:"laya-worker",withExtension:"py") ?? (FileManager.default.fileExists(atPath:developmentWorker.path) ? developmentWorker:nil) {laya.start(workerURL:workerURL)}
-        else {decisionStatus="Laya 组件缺失，继续保留声音"}
+        else {decisionStatus="Laya 组件缺失，自动触发暂不可用"}
         metering=Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else {return}
@@ -119,6 +119,7 @@ import SwiftUI
                 if self.listening != active {self.listening=active}
                 let saving=active && (self.service?.decisionStatus.snapshot.saving ?? false)
                 if self.recording != saving {self.recording=saving}
+                if active,self.service?.automaticDecisions==false,let detail=self.service?.decisionStatus.snapshot.detail,self.decisionStatus != detail {self.decisionStatus=detail}
                 let level=self.recording ? self.service?.activity.level(source:"mixed") ?? 0:0
                 let levels=Array(self.audioLevels.suffix(4))+[level]
                 if self.audioLevels != levels {self.audioLevels=levels}
@@ -128,12 +129,10 @@ import SwiftUI
         decisions=Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else {return}
-                if let service=self.service,service.isRecording {
-                    let token=service.sessionToken,quiet=service.activity.quietSeconds()
-                    let ready=service.activity.hasSamples(source:"system_audio",maxAge:1) && service.activity.hasSamples(source:"microphone",maxAge:1)
-                    let state=["声音状态":ready ? quiet<3.5 ? "当前有声音活动":"电脑和麦克风持续安静，已持续 \(Int(quiet)) 秒":"输入尚未完全就绪，声音情况未知",
-                               "当前状态":service.decisionStatus.snapshot.saving ? "正在保存混合录音":"听候新声音，内存有 10 秒预录",
-                               "用户偏好":"尽可能保留信息；声音或状态不确定时应保存"]
+                if let service=self.service,service.isRecording,service.automaticDecisions {
+                    let token=service.sessionToken,evidence=service.activity.startEvidence()
+                    let soundState = !evidence.inputsReady ? "输入状态未知，没有可靠的声音证据" : evidence.sustainedSound ? "持续检测到明显声音，声音已稳定持续 3 秒" : evidence.quietSeconds<3 ? "仅有短促声音，没有持续活动":"环境安静，没有明显的连续声音"
+                    let state=["声音状态":soundState,"当前状态":service.decisionStatus.snapshot.saving ? "正在录音":"正在听候"]
                     let decision=await self.laya.decide(state:state)
                     guard !Task.isCancelled else {return}
                     service.applyDecision(decision,session:token)
@@ -183,7 +182,7 @@ import SwiftUI
         if automaticLocation {locationService.start(requestPermission:false)}
         updateMetadata()
         do {
-            try await service.start(allowPermissionPrompts: prompts)
+            try await service.start(allowPermissionPrompts:prompts,automaticDecisions:automaticRecording)
             if suspended || !desiredRecording { try await service.stop(reason: "start_cancelled"); return }
             listening = service.isRecording
             recording = service.isRecording && service.decisionStatus.snapshot.saving
@@ -191,7 +190,7 @@ import SwiftUI
             hasError = false
             UserDefaults.standard.set(true, forKey: "vNext.captureConsent")
             UserDefaults.standard.set(true, forKey: "vNext.captureDesired")
-            message = automaticRecording ? "Laya 决定何时保存；听候时保留 10 秒预录，判断失败时继续录音" : "系统音与麦克风合并保存 · 原音访问需单独开启"
+            message = automaticRecording ? "先听候，持续声音和模型稳定确认后才录音；不确定时不自动开启" : "系统音与麦克风合并保存 · 原音访问需单独开启"
         } catch {
             hasError = true
             if !automaticRecording { desiredRecording = false; UserDefaults.standard.set(false,forKey: "vNext.captureDesired") }

@@ -224,7 +224,7 @@ struct IslandView: View {
                     Text(model.eventCaptureStatus).font(.system(size:10)).foregroundStyle(.white.opacity(0.4))
                     Button("检查事件详情权限") {model.eventService?.requestDetailsPermission()}.font(.system(size:10))
                     Toggle("自动记录声音",isOn: Binding(get: {model.automaticRecording},set: {model.setAutomaticRecording($0)}))
-                    Text("Laya 在本机判断录音或听候；听候只保留 10 秒内存预录。判断失败时保留声音，手动暂停后保持暂停。").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
+                    Text("先听候；持续明显声音与模型稳定确认后才保存。未知或模型异常不会开启录音，手动暂停后保持暂停。").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
                     Toggle("登录后自动启动",isOn: Binding(get: {model.autoResume},set: {model.setAutoResume($0)}))
                     HStack {
                         Text(model.loginStatus).font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))

@@ -14,7 +14,7 @@ import Foundation
         guard process==nil else {return}
         let root=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/AgentOne/Laya")
         let python=root.appendingPathComponent(".venv/bin/python")
-        guard FileManager.default.isExecutableFile(atPath:python.path) else {status="Laya 未安装，继续保留声音";return}
+        guard FileManager.default.isExecutableFile(atPath:python.path) else {status="Laya 未安装，不会自动触发录音";return}
         let process=Process(),stdin=Pipe(),stdout=Pipe()
         process.executableURL=python;process.arguments=["-u",workerURL.path]
         var env=ProcessInfo.processInfo.environment;env["HF_HOME"]=root.appendingPathComponent("cache").path;env["USE_TF"]="0";env["TOKENIZERS_PARALLELISM"]="false"
@@ -26,12 +26,12 @@ import Foundation
             Task { @MainActor in self?.receive(data) }
         }
         process.terminationHandler={ [weak self] _ in Task { @MainActor in self?.failed() } }
-        do {try process.run();self.process=process;input=stdin.fileHandleForWriting;status="Laya 加载中，先保留声音"
+        do {try process.run();self.process=process;input=stdin.fileHandleForWriting;status="Laya 正在加载"
             deadline=Task { [weak self] in
                 do {try await Task.sleep(for:.seconds(30))} catch {return}
-                self?.stop();self?.status="Laya 加载超时，继续保留声音"
+                self?.stop();self?.status="Laya 加载超时，不会自动触发录音"
             }}
-        catch {stdout.fileHandleForReading.readabilityHandler=nil;status="Laya 启动失败，继续保留声音"}
+        catch {stdout.fileHandleForReading.readabilityHandler=nil;status="Laya 启动失败，不会自动触发录音"}
     }
     private func receive(_ data:Data) {
         guard !data.isEmpty else {failed();return}
@@ -57,7 +57,7 @@ import Foundation
             deadline=Task { [weak self] in
                 do {try await Task.sleep(for:.seconds(5))} catch {return}
                 // Stop our stalled classifier instead of accumulating requests behind it.
-                self?.stop();self?.status="Laya 判断超时，继续保留声音"
+                self?.stop();self?.status="Laya 判断超时，不会自动触发录音"
             }
             do {try input.write(contentsOf:data)} catch {complete(nil)}
         }
@@ -66,6 +66,6 @@ import Foundation
         deadline?.cancel();deadline=nil
         let continuation=pending?.continuation;pending=nil;continuation?.resume(returning:result)
     }
-    private func failed() {ready=false;status="Laya 暂不可用，继续保留声音";complete(nil)}
+    private func failed() {ready=false;status="Laya 暂不可用，不会自动触发录音";complete(nil)}
     public func stop() {failed();input?.closeFile();input=nil;if process?.isRunning==true {process?.terminate()};process=nil}
 }

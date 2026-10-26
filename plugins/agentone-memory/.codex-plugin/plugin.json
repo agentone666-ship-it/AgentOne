@@ -1,6 +1,6 @@
 {
   "name": "agentone-memory",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Recall local audio and computer-event evidence and maintain sourced long-term memory.",
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
