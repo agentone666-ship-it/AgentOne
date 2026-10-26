@@ -39,6 +39,9 @@ try {
   const supervisorRoot=join(temporary,'supervisor-fixture');mkdirSync(supervisorRoot);
   const supervision=JSON.parse(run(recorder,['--supervisor-self-check','--root',supervisorRoot],{env:packagedEnv}));
   assert.equal(supervision.watchdog_restart,true);assert.equal(supervision.recording_started,false);
+  const pauseRoot=join(temporary,'supervisor-pause-fixture');mkdirSync(pauseRoot);
+  const paused=JSON.parse(run(recorder,['--supervisor-pause-self-check','--root',pauseRoot],{env:packagedEnv}));
+  assert.equal(paused.pause_respected,true);assert.equal(paused.recording_started,false);
   const check=JSON.parse(run(executable,['--self-check'],{env:packagedEnv}));
   assert.equal(check.agent_runtime,false);assert.equal(check.recording_started,false);assert.equal(check.recording_output,'mixed');assert.equal(check.schema,2);
   assert.deepEqual(check.sources,['system_audio','microphone']);

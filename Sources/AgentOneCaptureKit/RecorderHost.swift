@@ -15,6 +15,7 @@ import Darwin
     private var lastHeartbeat=Date.distantPast
     private var healthySince:Date?
     private var decisionNonce:String?,sealNonce:String?
+    private var pauseNonce:String?
     public init(root:URL) throws {database=try MemoryDatabase(root:root);service=NativeAudioCaptureService(database:database)}
     public func run() async throws {
         let fd=Darwin.open(database.root.appendingPathComponent("recorder-worker.lock").path,O_CREAT|O_RDWR,0o600)
@@ -39,6 +40,7 @@ import Darwin
                     }
                     if !control.desired || suspended {
                         if service.isRecording {try await service.stop(reason:!control.desired ? "user_paused":sleeping ? "sleep":"screen_locked");log("paused",detail:!control.desired ? "user_paused":"device_suspended")}
+                        if !control.desired {pauseNonce=control.pauseNonce}
                         error="";attempts=0
                     } else if Date()>=retryAfter {
                         if Date().timeIntervalSince1970*1000-control.updatedMS<600000 {service.metadata.restore(place:control.place,context:control.context)}
@@ -74,6 +76,7 @@ import Darwin
         value.mode=mode;value.session=service.sessionToken;value.inputs=service.activity.telemetry();value.sealNonce=sealNonce
         value.recordingStartedMS=service.recordingStartedMS
         value.waitingForUserPermission=waitingForPermission
+        value.pauseNonce=pauseNonce
         value.detail=service.isRecording ? service.decisionStatus.snapshot.detail:error.isEmpty ? "后台采集已暂停":error
         value.warning=error.isEmpty ? service.microphoneWarning:error
         if service.isRecording,value.warning.isEmpty {

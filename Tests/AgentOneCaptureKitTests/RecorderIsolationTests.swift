@@ -24,7 +24,14 @@ import Darwin
         #expect(try RecorderFiles.read(RecorderControl.self,from:RecorderFiles.control(root)).desired)
         snapshot.recording=false;snapshot.saving=false
         try RecorderFiles.write(snapshot,to:RecorderFiles.status(root))
+        let acknowledge=Task { @MainActor in
+            try await Task.sleep(for:.milliseconds(50))
+            snapshot.pauseNonce=try RecorderFiles.read(RecorderControl.self,from:RecorderFiles.control(root)).pauseNonce
+            try RecorderFiles.write(snapshot,to:RecorderFiles.status(root))
+        }
         try await client.stop(reason:"user_paused")
+        #expect(try RecorderFiles.read(RecorderSnapshot.self,from:RecorderFiles.status(root)).pauseNonce != nil)
+        try await acknowledge.value
         #expect(try !RecorderFiles.read(RecorderControl.self,from:RecorderFiles.control(root)).desired)
         // Reopening/polling a paused UI must not silently resume recording.
         let reopened=AudioCaptureService(database:database,recorderExecutable:URL(fileURLWithPath:"/usr/bin/false"))
@@ -119,7 +126,7 @@ struct RecorderWatermarkTests {
     }
     @Test func watchdogNeedsRealDiskProgressAndHonorsManualPause() {
         let policy=RecorderWatchdog(),pid:Int32=42
-        var status=RecorderSnapshot();status.pid=pid;status.recording=true;status.recordingStartedMS=0;status.heartbeatMS=100_000
+        var status=RecorderSnapshot();status.pid=pid;status.recording=true;status.saving=true;status.recordingStartedMS=0;status.heartbeatMS=100_000
         var pulse=RecorderAudioPulse(segmentID:"fixture",frames:48000);pulse.pid=pid;pulse.heartbeatMS=100_000
         #expect(!policy.shouldRestart(now:101_000,launched:0,pid:pid,status:status,pulse:pulse,desired:true))
         status.heartbeatMS=70_000
@@ -127,6 +134,8 @@ struct RecorderWatermarkTests {
         #expect(policy.shouldRestart(now:101_000,launched:0,pid:pid,status:status,pulse:pulse,desired:false)) // Pause must be actionable.
         pulse.heartbeatMS=70_000;status.heartbeatMS=100_000
         #expect(policy.shouldRestart(now:101_000,launched:0,pid:pid,status:status,pulse:pulse,desired:true)) // Fresh UI status cannot hide a dead writer.
+        status.saving=false
+        #expect(!policy.shouldRestart(now:101_000,launched:0,pid:pid,status:status,pulse:pulse,desired:true)) // Intelligent listening intentionally has no file.
         status.recording=false
         #expect(!policy.shouldRestart(now:101_000,launched:0,pid:pid,status:status,pulse:pulse,desired:false))
         status.waitingForUserPermission=true;status.heartbeatMS=0

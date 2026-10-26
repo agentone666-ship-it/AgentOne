@@ -10,7 +10,7 @@ struct RecorderWatchdog {
         if desired,status?.pid==pid,status?.waitingForUserPermission==true,now-launched<300_000 {return false}
         let statusAge=status?.pid==pid ? now-(status?.heartbeatMS ?? 0):Double.infinity
         let pulseAge=pulse?.pid==pid ? now-(pulse?.heartbeatMS ?? 0):Double.infinity
-        if desired,status?.pid==pid,status?.recording==true,now-(status?.recordingStartedMS ?? launched)>startupGraceMS,pulseAge>pulseTimeoutMS {return true}
+        if desired,status?.pid==pid,status?.recording==true,status?.saving==true,now-(status?.recordingStartedMS ?? launched)>startupGraceMS,pulseAge>pulseTimeoutMS {return true}
         return statusAge>statusTimeoutMS && (!desired || pulseAge>pulseTimeoutMS)
     }
 }
@@ -18,10 +18,11 @@ struct RecorderWatchdog {
 /// Separate process: a suspended framework continuation must not suspend its
 /// own watchdog. Monitors both control-loop liveness and actual PCM disk progress.
 public enum RecorderSupervisor {
-    public static func run(root:URL,executable:URL,fixture:Bool=false) async throws {
+    public static func run(root:URL,executable:URL,fixture:Bool=false,fixturePause:Bool=false) async throws {
         if fixture {
             guard (try FileManager.default.contentsOfDirectory(atPath:root.path)).isEmpty else {throw CaptureFailure.message("监督测试必须使用空目录")}
-            var control=RecorderControl();control.desired=true
+            var control=RecorderControl();control.desired = !fixturePause
+            if fixturePause {control.pauseNonce=UUID().uuidString}
             try RecorderFiles.write(control,to:RecorderFiles.control(root))
         }
         let fd=Darwin.open(root.appendingPathComponent("recorder-supervisor.lock").path,O_CREAT|O_RDWR|O_CLOEXEC,0o600)
@@ -36,6 +37,7 @@ public enum RecorderSupervisor {
             child.arguments=fixture ? ["60"]:["--worker","--root",root.path]
             child.standardOutput=FileHandle.nullDevice;child.standardError=FileHandle.nullDevice
             let launched=Date().timeIntervalSince1970*1000
+            var pauseRequestedAt:Double?
             do {
                 try child.run();starts+=1
                 if fixture {
@@ -45,19 +47,27 @@ public enum RecorderSupervisor {
                         Darwin.kill(child.processIdentifier,SIGKILL)
                         while child.isRunning {try await Task.sleep(for:.milliseconds(25))}
                         guard restarted else {throw CaptureFailure.message("监督重建测试失败")}
-                        print("{\"fixture\":true,\"watchdog_restart\":true,\"starts\":2,\"recording_started\":false}");return
+                        print("{\"fixture\":true,\"watchdog_restart\":true,\"starts\":2,\"pause_respected\":\(fixturePause),\"recording_started\":false}");return
                     }
-                    var status=RecorderSnapshot();status.pid=child.processIdentifier;status.recording=true;status.recordingStartedMS=launched-1000
+                    var status=RecorderSnapshot();status.pid=child.processIdentifier;status.recording = !fixturePause;status.recordingStartedMS=launched-1000
                     try RecorderFiles.write(status,to:RecorderFiles.status(root))
                     var pulse=RecorderAudioPulse(segmentID:"fixture",frames:1);pulse.pid=child.processIdentifier;pulse.heartbeatMS=launched-1000
                     try RecorderFiles.write(pulse,to:RecorderFiles.audioPulse(root))
                 }
                 while child.isRunning {
+                    if fixturePause {
+                        var status=RecorderSnapshot();status.pid=child.processIdentifier;status.recording=false
+                        try RecorderFiles.write(status,to:RecorderFiles.status(root))
+                    }
                     let status=try? RecorderFiles.read(RecorderSnapshot.self,from:RecorderFiles.status(root))
                     let pulse=try? RecorderFiles.read(RecorderAudioPulse.self,from:RecorderFiles.audioPulse(root))
-                    let desired=(try? RecorderFiles.read(RecorderControl.self,from:RecorderFiles.control(root)).desired) ?? true
-                    if policy.shouldRestart(now:Date().timeIntervalSince1970*1000,launched:launched,pid:child.processIdentifier,status:status,pulse:pulse,desired:desired) {
-                        appendEvent(root:root,event:"watchdog_unresponsive_recorder",pid:child.processIdentifier)
+                    let control=try? RecorderFiles.read(RecorderControl.self,from:RecorderFiles.control(root))
+                    let desired=control?.desired ?? true,now=Date().timeIntervalSince1970*1000
+                    let pausePending = !desired && control?.pauseNonce != nil && (status?.pid != child.processIdentifier || status?.pauseNonce != control?.pauseNonce || status?.recording != false)
+                    if pausePending {if pauseRequestedAt==nil {pauseRequestedAt=now}} else {pauseRequestedAt=nil}
+                    let forcePause=pauseRequestedAt.map {now-$0>(fixture ? 250:5000)} ?? false
+                    if forcePause || policy.shouldRestart(now:now,launched:launched,pid:child.processIdentifier,status:status,pulse:pulse,desired:desired) {
+                        appendEvent(root:root,event:forcePause ? "watchdog_unacknowledged_pause":"watchdog_unresponsive_recorder",pid:child.processIdentifier)
                         Darwin.kill(child.processIdentifier,SIGKILL);watchdogRestarts+=1
                         while child.isRunning {try await Task.sleep(for:.milliseconds(50))}
                         break

@@ -13,6 +13,7 @@ struct RecorderControl:Codable {
     var decisionNonce:String?
     var decisionSession:UUID?
     var sealNonce:String?
+    var pauseNonce:String?
 }
 struct RecorderAudioPulse:Codable {
     var pid=Int32(getpid())
@@ -33,6 +34,7 @@ struct RecorderSnapshot:Codable {
     var sealNonce:String?
     var recordingStartedMS:Double?
     var waitingForUserPermission:Bool?
+    var pauseNonce:String?
 }
 enum RecorderFiles {
     static func control(_ root:URL)->URL {root.appendingPathComponent("recorder-control.json")}
@@ -119,8 +121,8 @@ enum RecorderFiles {
         if let native {try await native.stop(reason:reason);return}
         // The recorder owns sleep/lock notifications. These never cancel persisted intent.
         if ["sleep","screen_locked","application_exit"].contains(reason) {return}
-        control.desired=false;try publish()
-        for _ in 0..<80 {reload();if !current.recording {return};try await Task.sleep(for:.milliseconds(100))}
+        let nonce=UUID().uuidString;control.pauseNonce=nonce;control.desired=false;try publish()
+        for _ in 0..<80 {reload();if fresh,!current.recording,current.pauseNonce==nonce {return};try await Task.sleep(for:.milliseconds(100))}
         throw CaptureFailure.message("后台采集暂停尚未确认")
     }
     public func applyDecision(_ decision:RecordingDecision?,session:UUID) {
