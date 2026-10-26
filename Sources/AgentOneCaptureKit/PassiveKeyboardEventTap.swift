@@ -5,20 +5,20 @@ import Foundation
 /// A CGEvent tap created with `.listenOnly`. Unlike a mutable event tap or an
 /// AppKit local monitor, this object has no path that can replace, suppress, or
 /// repost the user's keyboard event.
-final class PassiveKeyboardEventTap: @unchecked Sendable {
-    typealias SignalHandler = @Sendable (ReducedKeyboardSignal, Date) -> Void
+public final class PassiveKeyboardEventTap: @unchecked Sendable {
+    public typealias SignalHandler = @Sendable (ReducedKeyboardSignal, Date) -> Void
 
     private let signalHandler: SignalHandler
     private var reducer = KeyboardSignalReducer()
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
 
-    init(signalHandler: @escaping SignalHandler) {
+    public init(signalHandler: @escaping SignalHandler) {
         self.signalHandler = signalHandler
     }
 
     @discardableResult
-    func start() -> Bool {
+    public func start() -> Bool {
         guard eventTap == nil else { return true }
 
         let eventMask = CGEventMask(1) << CGEventType.keyDown.rawValue
@@ -45,7 +45,7 @@ final class PassiveKeyboardEventTap: @unchecked Sendable {
         return true
     }
 
-    func stop() {
+    public func stop() {
         if let source = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
         }
@@ -58,7 +58,7 @@ final class PassiveKeyboardEventTap: @unchecked Sendable {
         reducer = KeyboardSignalReducer()
     }
 
-    func resetTypingSession() {
+    public func resetTypingSession() {
         reducer.resetTypingSession()
     }
 

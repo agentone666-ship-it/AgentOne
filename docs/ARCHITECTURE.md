@@ -1,5 +1,7 @@
 # AgentOne 技术架构
 
+> 本文描述现有原型。2026-10-25 已提出移除独立 Agent Runtime、采用灵动岛＋采集服务＋Memory 插件的新方向；迁移与验收边界见 [vNext 迁移设计](vnext/MIGRATION_AND_ACCEPTANCE.md)。默认 App 已切换为采集＋MCP；历史 Pi Sidecar 只保留为迁移期回归，当前实现状态见 [STATUS_CAPTURE_MEMORY](vnext/STATUS_CAPTURE_MEMORY.md)。
+
 ## 设计目标
 
 AgentOne 的技术架构围绕四个约束展开：

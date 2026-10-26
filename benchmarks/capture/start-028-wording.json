@@ -1,0 +1,83 @@
+{
+  "kind": "wording_probe_not_audio_accuracy",
+  "policy": "0.2.8",
+  "model": "convaiinnovations/laya/multilingual",
+  "revision": "7b928d828b7b0e022f929d9bd2e44165aa270148",
+  "runtime": "laya==0.4.12",
+  "correct": 7,
+  "total": 8,
+  "rows": [
+    {
+      "case": "quiet_minute",
+      "expected": "wait",
+      "id": "quiet_minute",
+      "choice": "wait",
+      "confidence": 0.7363,
+      "entropy_confidence": 0.1677,
+      "latency_ms": 130.1
+    },
+    {
+      "case": "coworker_speech",
+      "expected": "record",
+      "id": "coworker_speech",
+      "choice": "wait",
+      "confidence": 0.6789,
+      "entropy_confidence": 0.0944,
+      "latency_ms": 50.6
+    },
+    {
+      "case": "video",
+      "expected": "record",
+      "id": "video",
+      "choice": "record",
+      "confidence": 0.547,
+      "entropy_confidence": 0.0064,
+      "latency_ms": 46.0
+    },
+    {
+      "case": "mic_disconnected",
+      "expected": "wait",
+      "id": "mic_disconnected",
+      "choice": "wait",
+      "confidence": 0.8196,
+      "entropy_confidence": 0.319,
+      "latency_ms": 36.5
+    },
+    {
+      "case": "quiet_30",
+      "expected": "wait",
+      "id": "quiet_30",
+      "choice": "wait",
+      "confidence": 0.8583,
+      "entropy_confidence": 0.4112,
+      "latency_ms": 31.3
+    },
+    {
+      "case": "pause_2",
+      "expected": "wait",
+      "id": "pause_2",
+      "choice": "wait",
+      "confidence": 0.8331,
+      "entropy_confidence": 0.3495,
+      "latency_ms": 29.1
+    },
+    {
+      "case": "system_lost",
+      "expected": "wait",
+      "id": "system_lost",
+      "choice": "wait",
+      "confidence": 0.7808,
+      "entropy_confidence": 0.2412,
+      "latency_ms": 28.9
+    },
+    {
+      "case": "pause_5",
+      "expected": "wait",
+      "id": "pause_5",
+      "choice": "wait",
+      "confidence": 0.7908,
+      "entropy_confidence": 0.2601,
+      "latency_ms": 30.7
+    }
+  ]
+}

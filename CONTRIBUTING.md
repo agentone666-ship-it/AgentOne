@@ -14,6 +14,13 @@ Thenvia（留境，原 AgentOne）仍处于快速迭代期。提交变更时，�
 4. 运行 `npm ci --prefix AgentOneLifeRuntime` 和 `bash scripts/ci.sh all`。
 5. 检查截图、日志、fixture 和 diff 中没有真实用户数据或凭证。
 
+## v0.2 采集与插件边界
+
+- 默认产品只依赖 CaptureKit，不新增独立 Agent Loop 或把旧 Pi Runtime 带回安装包。
+- 修改共享 SQLite schema 时，同步 Swift resource 与 MCP schema；测试会检查一致性。
+- 合成音频/转写只能验证接口，真实采集、ASR 与全天效果需另行记录。
+- 音频引用必须有区间与来源；删除必须传播到转写、标签和巩固记忆。
+
 ## 提交规范
 
 从 `main` 建主题分支，通过 PR 合并；`all checks passed` 必须通过。

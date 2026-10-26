@@ -1,0 +1,373 @@
+{
+  "benchmark": "agentone-recall-v1",
+  "mode": "candidate",
+  "scope": "Synthetic transcript retrieval + evidence/handoff contracts through a real MCP subprocess. Not ASR, speech quality, LLM reasoning or real-world execution.",
+  "recordings": 258,
+  "cases": 18,
+  "metrics": {
+    "positive_top1": "15/15",
+    "positive_recall_at_5": 1,
+    "status_accuracy": "18/18",
+    "scenario_pass": "18/18",
+    "event_link": "2/2",
+    "action_contract": "3/3"
+  },
+  "dev": {
+    "positive_top1": "11/11",
+    "positive_recall_at_5": 1,
+    "status_accuracy": "12/12",
+    "scenario_pass": "12/12",
+    "event_link": "n/a",
+    "action_contract": "3/3"
+  },
+  "transfer": {
+    "positive_top1": "4/4",
+    "positive_recall_at_5": 1,
+    "status_accuracy": "6/6",
+    "scenario_pass": "6/6",
+    "event_link": "2/2",
+    "action_contract": "n/a"
+  },
+  "latency_p95_ms": 53.81,
+  "rows": [
+    {
+      "id": "exact",
+      "split": "dev",
+      "expected_status": "found",
+      "status": "found",
+      "status_pass": true,
+      "expected_audio": true,
+      "needs_event": false,
+      "needs_action": true,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 53.81,
+      "sessions": [
+        "design",
+        "video"
+      ]
+    },
+    {
+      "id": "vague-person",
+      "split": "dev",
+      "expected_status": "found",
+      "status": "found",
+      "status_pass": true,
+      "expected_audio": true,
+      "needs_event": false,
+      "needs_action": false,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 16.83,
+      "sessions": [
+        "design"
+      ]
+    },
+    {
+      "id": "wrong-place",
+      "split": "dev",
+      "expected_status": "found",
+      "status": "found",
+      "status_pass": true,
+      "expected_audio": true,
+      "needs_event": false,
+      "needs_action": false,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 5.9,
+      "sessions": [
+        "remote"
+      ]
+    },
+    {
+      "id": "uncertain-day",
+      "split": "dev",
+      "expected_status": "found",
+      "status": "found",
+      "status_pass": true,
+      "expected_audio": true,
+      "needs_event": false,
+      "needs_action": false,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 11.6,
+      "sessions": [
+        "remote"
+      ]
+    },
+    {
+      "id": "afternoon",
+      "split": "dev",
+      "expected_status": "found",
+      "status": "found",
+      "status_pass": true,
+      "expected_audio": true,
+      "needs_event": false,
+      "needs_action": false,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 14.84,
+      "sessions": [
+        "evening"
+      ]
+    },
+    {
+      "id": "pending",
+      "split": "dev",
+      "expected_status": "needs_transcription",
+      "status": "needs_transcription",
+      "status_pass": true,
+      "expected_audio": true,
+      "needs_event": false,
+      "needs_action": false,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 7.77,
+      "sessions": [
+        "pending"
+      ]
+    },
+    {
+      "id": "ambiguous",
+      "split": "dev",
+      "expected_status": "needs_clarification",
+      "status": "needs_clarification",
+      "status_pass": true,
+      "expected_audio": true,
+      "needs_event": false,
+      "needs_action": false,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 7.88,
+      "sessions": [
+        "ambiguous-b",
+        "ambiguous-a"
+      ]
+    },
+    {
+      "id": "missing",
+      "split": "dev",
+      "expected_status": "not_found",
+      "status": "not_found",
+      "status_pass": true,
+      "expected_audio": false,
+      "needs_event": false,
+      "needs_action": false,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 7.55,
+      "sessions": []
+    },
+    {
+      "id": "cancelled",
+      "split": "dev",
+      "expected_status": "found",
+      "status": "found",
+      "status_pass": true,
+      "expected_audio": true,
+      "needs_event": false,
+      "needs_action": true,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 13.4,
+      "sessions": [
+        "cancel"
+      ]
+    },
+    {
+      "id": "proposal",
+      "split": "dev",
+      "expected_status": "found",
+      "status": "found",
+      "status_pass": true,
+      "expected_audio": true,
+      "needs_event": false,
+      "needs_action": true,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 9.92,
+      "sessions": [
+        "proposal"
+      ]
+    },
+    {
+      "id": "untrusted",
+      "split": "dev",
+      "expected_status": "found",
+      "status": "found",
+      "status_pass": true,
+      "expected_audio": true,
+      "needs_event": false,
+      "needs_action": false,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 10.59,
+      "sessions": [
+        "injection"
+      ]
+    },
+    {
+      "id": "old-memory",
+      "split": "dev",
+      "expected_status": "found",
+      "status": "found",
+      "status_pass": true,
+      "expected_audio": true,
+      "needs_event": false,
+      "needs_action": false,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 8.87,
+      "sessions": [
+        "older"
+      ]
+    },
+    {
+      "id": "event-link",
+      "split": "transfer",
+      "expected_status": "found",
+      "status": "found",
+      "status_pass": true,
+      "expected_audio": true,
+      "needs_event": true,
+      "needs_action": false,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 7.06,
+      "sessions": [
+        "event-anchor"
+      ]
+    },
+    {
+      "id": "name-uncertain",
+      "split": "transfer",
+      "expected_status": "needs_clarification",
+      "status": "needs_clarification",
+      "status_pass": true,
+      "expected_audio": true,
+      "needs_event": false,
+      "needs_action": false,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 10.03,
+      "sessions": [
+        "design",
+        "video"
+      ]
+    },
+    {
+      "id": "pending-no-text",
+      "split": "transfer",
+      "expected_status": "needs_transcription",
+      "status": "needs_transcription",
+      "status_pass": true,
+      "expected_audio": true,
+      "needs_event": false,
+      "needs_action": false,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 10.98,
+      "sessions": [
+        "pending"
+      ]
+    },
+    {
+      "id": "deleted",
+      "split": "transfer",
+      "expected_status": "not_found",
+      "status": "not_found",
+      "status_pass": true,
+      "expected_audio": false,
+      "needs_event": false,
+      "needs_action": false,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 4.02,
+      "sessions": []
+    },
+    {
+      "id": "timezone",
+      "split": "transfer",
+      "expected_status": "found",
+      "status": "found",
+      "status_pass": true,
+      "expected_audio": true,
+      "needs_event": false,
+      "needs_action": false,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 13.93,
+      "sessions": [
+        "ny"
+      ]
+    },
+    {
+      "id": "historical-event",
+      "split": "transfer",
+      "expected_status": "event_only",
+      "status": "event_only",
+      "status_pass": true,
+      "expected_audio": false,
+      "needs_event": true,
+      "needs_action": false,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 15.75,
+      "sessions": []
+    }
+  ]
+}

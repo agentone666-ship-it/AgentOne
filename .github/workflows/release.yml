@@ -25,8 +25,8 @@ jobs:
           RELEASE_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
-          version=$(node -p 'require("./AgentOneLifeRuntime/package.json").version')
-          [[ "$RELEASE_REF" == "refs/tags/v$version" ]] || { echo '::error::Select the vX.Y.Z tag matching package.json'; exit 1; }
+          version=$(cat VERSION)
+          [[ "$RELEASE_REF" == "refs/tags/v$version" ]] || { echo '::error::Select the vX.Y.Z tag matching VERSION'; exit 1; }
           git merge-base --is-ancestor HEAD origin/main
 
   validate:
@@ -55,7 +55,7 @@ jobs:
           set -euo pipefail
           sha256sum --check SHA256SUMS
           cat > NOTES.md <<'NOTES'
-          macOS 14+ / Apple Silicon prototype build.
+          macOS 15+ / Apple Silicon capture and memory preview.
 
           This build has an ad-hoc signature and is not Apple notarized. It is
           intended for development preview, not a trusted public distribution.

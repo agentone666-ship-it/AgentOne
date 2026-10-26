@@ -1,0 +1,101 @@
+[
+  {
+    "schema_version": "0.1-draft",
+    "id": "SYNTHETIC-segment-1",
+    "kind": "audio_segment",
+    "recorded_at": "2026-10-25T16:19:00Z",
+    "payload": {
+      "session_id": "SYNTHETIC-session-1",
+      "source": "microphone",
+      "started_at": "2026-10-25T16:18:00Z",
+      "ended_at": "2026-10-25T16:19:00Z",
+      "captured_time_zone": "America/Los_Angeles",
+      "duration_ms": 60000,
+      "monotonic_anchor_ns": "123000000000",
+      "clock_domain_id": "SYNTHETIC-device-boot-1",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "codec": "aac",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": "sealed",
+      "place": {
+        "label": "工位",
+        "source": "user_annotation",
+        "certainty": "user_confirmed",
+        "observed_at": "2026-10-25T16:10:00Z",
+        "accuracy_meters": null,
+        "evidence_ids": []
+      },
+      "context_event_ids": [],
+      "access": {
+        "capture_grant_id": "SYNTHETIC-grant-1",
+        "cloud_audio_allowed": false,
+        "host_text_allowed": true
+      }
+    }
+  },
+  {
+    "schema_version": "0.1-draft",
+    "id": "SYNTHETIC-transcript-1",
+    "kind": "transcript_revision",
+    "recorded_at": "2026-10-25T16:20:00Z",
+    "payload": {
+      "segment_id": "SYNTHETIC-segment-1",
+      "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "revision": 1,
+      "status": "succeeded",
+      "engine": "SYNTHETIC-fixture-not-an-ASR-run",
+      "utterances": [
+        {
+          "speaker_local_id": "speaker_1",
+          "text": "原型可以先做出来看看。",
+          "start_ms": 38000,
+          "end_ms": 54000,
+          "language": "zh-CN",
+          "unclear": false
+        }
+      ]
+    }
+  },
+  {
+    "schema_version": "0.1-draft",
+    "id": "SYNTHETIC-claim-1",
+    "kind": "memory_claim",
+    "recorded_at": "2026-10-25T16:21:00Z",
+    "payload": {
+      "claim_type": "task_candidate",
+      "text": "制作原型供讨论",
+      "epistemic_status": "model_inference",
+      "evidence": [
+        {
+          "segment_id": "SYNTHETIC-segment-1",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "transcript_revision": 1,
+          "start_ms": 38000,
+          "end_ms": 54000,
+          "quote": "原型可以先做出来看看。"
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null,
+      "supersedes": [],
+      "extractor_revision": "SYNTHETIC-fixture-not-a-model-run",
+      "owner_entity_id": null,
+      "due_at": null,
+      "action_state": "proposed",
+      "execution_receipt_ids": []
+    }
+  },
+  {
+    "schema_version": "0.1-draft",
+    "id": "SYNTHETIC-gap-1",
+    "kind": "coverage_gap",
+    "recorded_at": "2026-10-25T17:00:00Z",
+    "payload": {
+      "started_at": "2026-10-25T16:45:00Z",
+      "ended_at": "2026-10-25T17:00:00Z",
+      "source": "all",
+      "reason": "user_paused"
+    }
+  }
+]

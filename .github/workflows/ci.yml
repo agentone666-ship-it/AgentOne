@@ -64,7 +64,9 @@ jobs:
         if: always()
         with:
           name: runtime-logs-node-${{ matrix.node }}
-          path: build/ci-logs/
+          path: |
+            build/ci-logs/
+            build/benchmarks/
           retention-days: 7
 
   macos:
@@ -82,14 +84,10 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: AgentOneLifeRuntime/package-lock.json
-      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
-        with:
-          deno-version-file: .deno-version
       - name: Verify toolchain
         run: |
           swift --version
           node --version
-          deno --version
           zsh -n scripts/build_app.sh scripts/test_e2e.sh
       - run: npm ci --prefix AgentOneLifeRuntime
       - name: Swift unit tests and synthetic OCR
@@ -97,7 +95,7 @@ jobs:
           mkdir -p build/ci-logs
           set -o pipefail
           bash scripts/ci.sh swift 2>&1 | tee build/ci-logs/swift.log
-      - name: Swift and Sidecar integration harnesses
+      - name: Native audio and regression harnesses
         run: |
           set -o pipefail
           bash scripts/ci.sh integration 2>&1 | tee build/ci-logs/integration.log

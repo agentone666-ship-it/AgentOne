@@ -11,11 +11,19 @@ let package = Package(
         .library(name: "AgentOneModelAuth", targets: ["AgentOneModelAuth"]),
         .library(name: "AgentOneCredentialStore", targets: ["AgentOneCredentialStore"]),
         .library(name: "AgentOnePiRuntime", targets: ["AgentOnePiRuntime"]),
-        .executable(name: "AgentOne", targets: ["AgentOneApp"]),
+        .executable(name: "AgentOne", targets: ["AgentOneCaptureApp"]),
+        .executable(name: "AgentOneLegacy", targets: ["AgentOneApp"]),
+        .library(name: "AgentOneCaptureKit", targets: ["AgentOneCaptureKit"]),
+        .executable(name: "AgentOneAudioHarness", targets: ["AgentOneAudioHarness"]),
         .executable(name: "AgentOneCoreHarness", targets: ["AgentOneCoreHarness"]),
         .executable(name: "AgentOnePiIntegrationHarness", targets: ["AgentOnePiIntegrationHarness"])
     ],
     targets: [
+        .target(name: "AgentOneCaptureKit", dependencies: ["AgentOneCore"], resources: [.process("Resources")]),
+        .executableTarget(name: "AgentOneCaptureApp", dependencies: ["AgentOneCaptureKit"]),
+        .executableTarget(name: "AgentOneAudioHarness", dependencies: ["AgentOneCaptureKit"]),
+        .testTarget(name: "AgentOneCaptureKitTests", dependencies: ["AgentOneCaptureKit"]),
+        .testTarget(name: "AgentOneIslandTests", dependencies: ["AgentOneCaptureApp"]),
         .target(name: "AgentOneCore"),
         .target(name: "AgentOneModelAuth"),
         .target(
@@ -36,7 +44,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "AgentOneApp",
-            dependencies: ["AgentOneCore", "AgentOneModelRuntime", "AgentOneModelAuth", "AgentOneCredentialStore", "AgentOnePiRuntime"],
+            dependencies: ["AgentOneCore", "AgentOneCaptureKit", "AgentOneModelRuntime", "AgentOneModelAuth", "AgentOneCredentialStore", "AgentOnePiRuntime"],
             exclude: [
                 "PiRuntime",
                 "ModelRuntime/ModelInference.swift",
