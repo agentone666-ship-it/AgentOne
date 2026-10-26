@@ -1,129 +1,92 @@
+<p align="center">
+  <img src="docs/brand/hero.png" alt="Thenvia 留境 — Context carried forward." width="820" />
+</p>
+
 <div align="center">
 
-# AgentOne
+**你经历过的，不必再讲一遍。**
 
-**把经历留下，把行动交给你的 Agent。**
+给你的 Agent 提供可追溯的个人经历记忆。
 
-macOS 灵动岛 · 自动混合录音 · 事件记录 · 可追溯的个人记忆 · 通用 MCP
+[![CI](https://github.com/agentone666-ship-it/Thenvia/actions/workflows/ci.yml/badge.svg)](https://github.com/agentone666-ship-it/Thenvia/actions/workflows/ci.yml)
+![macOS 15+](https://img.shields.io/badge/macOS-15%2B-101715)
+![Development preview](https://img.shields.io/badge/status-development_preview-98D8C0?labelColor=101715)
 
-[![CI](https://github.com/agentone666-ship-it/AgentOne/actions/workflows/ci.yml/badge.svg)](https://github.com/agentone666-ship-it/AgentOne/actions/workflows/ci.yml)
+[体验开发预览](#体验开发预览) · [接入 Agent](#接入你的-agent) · [使用指南](docs/GETTING_STARTED.md) · [English](README.en.md)
 
 </div>
 
-> “今天早上在工位和同事聊的那个需求，帮我找出录音，整理成待办，再接着做。”
+> 「今天早上在工位聊的那个需求，帮我找出录音，整理下一步。」
 
-AgentOne 为这类需求保留现场：电脑声音与麦克风混成一条录音，并关联时间、手动标注的地点和电脑活动。你连接的 Agent 通过 MCP 查找候选、核对原话与上下文，再提取长期记忆或执行你授权的事项。
+Thenvia（留境，原 AgentOne）把允许记录的系统声音、麦克风与电脑事件留在本机，让你使用的 Agent 根据时间、地点和内容找回线索，核对原话与上下文，再接着处理。
 
-**现在的界面是屏幕顶部的灵动岛。** 鼠标移到刘海区域展开，移开收起；也可以固定展开。记录、回忆和设置都在岛内完成。
+顶部灵动岛负责记录状态和用户控制，插件与 MCP 负责把资料交给现有 Agent。
 
-> **开发预览**：新版应用代码与构建入口位于 [`codex/audio-memory-mvp`](https://github.com/agentone666-ship-it/AgentOne/tree/codex/audio-memory-mvp)，见 [PR #2](https://github.com/agentone666-ship-it/AgentOne/pull/2)。本页提前更新产品介绍；`main` 的应用代码仍处于迁移前版本。新版尚未作为正式版本发行。
+> **开发预览**：新版应用目前位于 [`codex/audio-memory-mvp`](https://github.com/agentone666-ship-it/Thenvia/tree/codex/audio-memory-mvp)，见 [PR #2](https://github.com/agentone666-ship-it/Thenvia/pull/2)。`main` 的应用代码仍在迁移前阶段；下面的体验步骤会切换到新版。App 内及配置中的 `AgentOne` 名称暂作兼容保留。
 
-## 现在的界面
+## 留下现场，找回依据，接着做
+
+| 留下现场 | 找回依据 | 接着做 |
+| --- | --- | --- |
+| 系统音与麦克风混成一条录音，关联时间、电脑事件及获授权的地点线索 | Agent 用模糊线索查找候选，读取原话、前后文和音频来源 | 核对讨论、承诺与后续变更，整理待办或写回长期记忆；宿主负责执行 |
 
 <p align="center">
-  <img src="docs/images/island-record.png" alt="灵动岛记录页：系统声音与麦克风合并为一条录音，支持地点标注和暂停" width="48%" />
-  <img src="docs/images/island-recall.png" alt="灵动岛回忆页：搜索声音、查看转写和标签、回放原音" width="48%" />
+  <img src="docs/images/island-record.png" alt="原生灵动岛记录页：合并录音与自动地点状态，演示数据" width="48%" />
+  <img src="docs/images/island-recall.png" alt="原生灵动岛回忆页：声音原话、来源与回放入口，演示数据" width="48%" />
 </p>
 
-<p align="center">
-  <img src="docs/images/island-events.png" alt="灵动岛事件页：统一查看旧 Diary 与新的现场活动线索" width="48%" />
-  <img src="docs/images/island-settings.png" alt="灵动岛设置页：自动记录、登录启动、锁屏暂停、本机转写与原音访问" width="48%" />
-</p>
+图片由原生界面离屏渲染，使用演示数据，不包含真实录音、位置或工作内容。静态界面展示不代表完整宿主执行已验收。
 
-以上图片由当前原生 SwiftUI 界面离屏渲染，使用明确标注的演示数据，不含真实录音、转写或电脑活动。演示中的地点与对话不代表实际记录。
+## 体验开发预览
 
-## 它会保留什么
-
-| 信息 | 如何帮助回忆 |
-| --- | --- |
-| 一条混合录音 | 系统音与麦克风按同一时间轴对齐，分段保存，回放和转写共用一条录音 |
-| 时间与现场 | 保留开始时间、时长、输入状态、暂停或断流信息；地点由用户手动标注 |
-| 电脑事件 | 关联应用、窗口、可读取的页面与交互线索；旧 Diary 也可检索，细节取决于系统授权 |
-| 转写与标签 | 可选本机语音转写；连接的 Agent 领取分析任务，写回主题、事实与待办候选 |
-| 长期记忆 | 保存来源引用、有效时间、得知时间与更新替代关系，支持日后重新核查 |
-
-原音和现场线索保存在本机。附近打开的网页只是线索，不能当成谈话原话；提到一个人，也不能直接认定他就是录音中的说话人。
-
-## 从模糊回忆到下一步
-
-```mermaid
-flowchart LR
-    A["系统声音 + 麦克风"] --> B["一条分段录音"]
-    C["时间 · 地点 · 电脑事件"] --> D["关联现场"]
-    B --> D
-    D --> E["MCP 检索候选"]
-    E --> F["核对原话与上下文"]
-    F --> G["你的 Agent：记忆 · 待办 · 行动"]
-```
-
-1. **自动留下现场**：首次完成系统音和麦克风授权后，自动记录；手动暂停会保留，不会因重启自行取消。
-2. **按线索找回来**：Agent 综合主题、时间、地点和事件查找录音；有多个候选时继续核查或向你确认。
-3. **核对后再落实**：通过来源与上下文区分提议、承诺和已取消事项，再由宿主 Agent 执行当前授权范围内的任务。
-
-AgentOne 提供采集、检索和记忆接口。持续分析与行动需要你选择的 MCP 宿主运行；接入插件本身不会让已关闭的 Agent 自动工作。
-
-## 运行新版
-
-需要 macOS 15+、Swift 6.1+；MCP 服务需要 Node.js 22.19+。
+需要 **macOS 15+、Swift 6.1+**；插件/MCP 服务需要 **Node.js 22.19+**。目前从源码构建，尚无正式发行版。
 
 ```bash
-git clone https://github.com/agentone666-ship-it/AgentOne.git
-cd AgentOne
-git switch codex/audio-memory-mvp
+git clone --branch codex/audio-memory-mvp https://github.com/agentone666-ship-it/Thenvia.git
+cd Thenvia
 swift run AgentOne
-
-# 构建安装包
-./scripts/build_app.sh release
 ```
 
-安装包生成在 `build/AgentOne.app.zip`。在 iCloud 工作区构建时，先解压到普通本地目录，再启动。
+1. 完成首次系统音与麦克风授权，在灵动岛确认输入状态。默认先听候，持续声音与稳定决策满足条件后保存混合录音。
+2. 在「设置」启用本机转写，在允许记录的环境中说一段测试说明。
+3. 等待片段封口与转写完成，到「回忆」搜索关键词，回放并确认来源。
 
-- 鼠标悬停刘海约 0.16 秒展开，离开约 0.6 秒收起；图钉可保持展开。无刘海显示器使用顶部胶囊。
-- 「记录」页查看输入状态、标注地点、暂停或恢复记录。
-- 「回忆」页切换声音与事件，搜索转写、主题或地点，并回放原音。
-- 「设置」页管理自动记录、登录启动、锁屏暂停、本机转写和 Agent 原音访问。登录启动以系统实际批准为准。
+默认约 60 秒分段；听候、暂停与断流可能留下未保存区间。首次模型配置、构建安装包和故障处理见 [使用指南](docs/GETTING_STARTED.md)。
 
-## 连接你的 Agent
+## 接入你的 Agent
 
-在新版分支中生成通用 MCP 配置：
+「设置 → 连接 Agent」提供两种方式：
 
-```bash
-node scripts/print_mcp_config.mjs
-# 或使用已安装应用中的服务（改为你的实际路径）
-node scripts/print_mcp_config.mjs '/Applications/AgentOne.app'
-```
+- **插件**：生成本机插件包，把记忆工具与回忆工作流一起交给支持本地插件的宿主。
+- **MCP**：复制配置到支持本机 stdio MCP 的宿主，也可在新版分支运行 `node scripts/print_mcp_config.mjs`。
 
-把输出加入宿主的 MCP 配置。通过 `recall_context` 查候选，`get_context_bundle` 取原话与上下文，`get_context_event` 核查事件来源。`recall_and_act` prompt 引导宿主完成查找、确认与行动交接。
+然后尝试：「查一下刚才那段测试说明，给我原话和录音来源。」
 
-默认数据目录为 `~/Documents/AgentOne Home/Memory`，也兼容现有 Agent Home 的 `Memory` 子目录；可用 `AGENTONE_MEMORY_HOME` 自定义。
+插件导出不包含你的录音库。服务自检与真实宿主连接分别显示；宿主关闭时，接入插件不会让它持续分析。[接入说明](https://github.com/agentone666-ship-it/Thenvia/blob/codex/audio-memory-mvp/plugins/agentone-memory/README.md)
 
-工具与后台分析队列见 [新版 MCP 说明](https://github.com/agentone666-ship-it/AgentOne/blob/codex/audio-memory-mvp/plugins/agentone-memory/README.md)。
+## 资料归你，记录由你控制
 
-## 验证与当前边界
+- **本机保存**：无需 Thenvia 云账号；原音、索引与记忆保存在本机。
+- **随时控制**：暂停/恢复、锁屏暂停、本机转写和原音访问可单独设置。
+- **地点有来源**：获授权后使用系统定位；失败时记为未知，不能据此识别具体工位或人物。
+- **宿主数据路径明确**：连接的 Agent 可能把读取到的资料交给云模型；原音访问需要单独开启。
 
-新版分支可运行：
+录音与事件都应在你有权记录的场景中使用。完整说明见 [隐私与数据控制](https://github.com/agentone666-ship-it/Thenvia/blob/codex/audio-memory-mvp/docs/PRIVACY.md)。
 
-```bash
-swift test
-swift run AgentOneAudioHarness
-node --test plugins/agentone-memory/test.mjs
-node benchmarks/recall/run.mjs --check
+## 当前进展
 
-# 包括迁移期历史回归与安装包检查
-npm ci --prefix AgentOneLifeRuntime
-bash scripts/ci.sh all
-```
+新版已有混合录音、声音活动门控、事件导入、可选本机转写、插件导出与证据回读的实现和局部验证。**全天稳定性、真实对话检索效果，以及具体宿主从找回到执行的完整链路仍在验收。**
 
-CI 检查音频编码与持久化、MCP 子进程、证据校验、任务队列和安装包。模糊回忆固定合成场景通过 **18/18**，探索性语言挑战为 **2/4**；这些结果不代表真实语音识别、多人对话或宿主执行的准确率。详见 [Recall Benchmark](https://github.com/agentone666-ship-it/AgentOne/blob/codex/audio-memory-mvp/benchmarks/recall/README.md)。
+检索采用词面匹配和宿主查询扩展；当前不提供可靠说话人识别。长期记忆保留引用与更新关系，附近网页与人物提及需要核对，不能直接当作谈话事实。
 
-已有短时真机混音、本机转写、历史事件导入与原音校验；全天稳定性、真实对话检索效果和宿主完整执行仍需继续验收。目前检索采用词面匹配和宿主查询扩展，尚无向量检索、自动定位或可靠的说话人识别。
+[路线图](docs/ROADMAP.md) · [实现与验证记录](https://github.com/agentone666-ship-it/Thenvia/blob/codex/audio-memory-mvp/docs/vnext/STATUS_CAPTURE_MEMORY.md) · [Recall Benchmark](https://github.com/agentone666-ship-it/Thenvia/blob/codex/audio-memory-mvp/benchmarks/recall/README.md)
 
-## 隐私与开发
+## 参与
 
-不需要 AgentOne 云账号。原音访问需要单独开启；接入宿主后，宿主可能把读取的资料交给云模型。本机文件权限保护不等于应用级加密。使用前请阅读 [新版隐私说明](https://github.com/agentone666-ship-it/AgentOne/blob/codex/audio-memory-mvp/docs/PRIVACY.md)。
+[反馈体验](https://github.com/agentone666-ship-it/Thenvia/issues/new?template=experience.yml) · [报告问题](https://github.com/agentone666-ship-it/Thenvia/issues/new?template=bug_report.yml) · [提出场景](https://github.com/agentone666-ship-it/Thenvia/issues/new?template=feature_request.yml)
 
-新版默认应用由 `AgentOneCaptureApp`、`AgentOneCaptureKit` 与 `plugins/agentone-memory` 组成。旧界面代码仅保留迁移回归，新版分发使用灵动岛与通用 MCP。
+请用演示材料或脱敏描述反馈，避免上传私人录音、转写、地点或公司资料。
 
-[开发与 CI/CD](docs/CI_CD.md) · [新版实现状态](https://github.com/agentone666-ship-it/AgentOne/blob/codex/audio-memory-mvp/docs/vnext/STATUS_CAPTURE_MEMORY.md) · [贡献](CONTRIBUTING.md) · [安全](SECURITY.md)
+开发与测试见 [贡献指南](CONTRIBUTING.md) 和 [CI/CD](docs/CI_CD.md)；品牌资源见 [品牌说明](docs/BRAND.md)。
 
-当前仓库尚未授予开源许可证；未经明确许可，请勿复制或再分发项目代码与素材。
+当前源码尚未授予开源许可证。安全问题按 [安全政策](SECURITY.md) 报告。
