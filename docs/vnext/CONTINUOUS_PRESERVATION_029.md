@@ -37,6 +37,6 @@
 
 ## NATIVE CALLBACK AND FALLBACK FOLLOW-UP
 
-后续重开又出现麦克风缺采样；不把一次双输入短测当成持续稳定的证明。原引擎 3 次恢复失败后仅尝试一次独立的 AVCaptureSession 音频通道，停用原 tap，避免双重混音。通过 session.synchronizationClock 转换到 CoreAudio host clock 后送入原混音器，保存策略和单文件输出不变。仍失败则明确提示，不无限重试或停止电脑声音。短时真机结果与最后 CI 状态另记于 PR #2 的验收记录。
+后续重开又出现麦克风缺采样；不把一次双输入短测当成持续稳定的证明。原引擎 3 次恢复失败后仅尝试一次独立的 AVCaptureSession 音频通道，停用原 tap，避免双重混音。通过 session.synchronizationClock 转换到 CoreAudio host clock 后送入原混音器，保存策略和单文件输出不变。仍失败则明确提示，不无限重试或停止电脑声音。短时真机结果与最后 CI 状态另记于 PR #7 的验收记录；PR #2 已由其他工作流程合入 main，后续修复基于其最终模式切换协调代码。
 
 同时发现实际崩溃报告（20:59:18，EXC_BAD_ACCESS）定位到 EventCaptureService.start 的全局鼠标监听回调/Swift executor 检查。全局回调改由非 Actor 的 Sendable 工厂创建，仅将不可变 PassivePointerSignal 交给 MainActor；新增从后台线程实际投递 NSEvent 的回归，137 项 Swift 测试通过。此修复不新增字符采集、权限或 Agent runtime。
