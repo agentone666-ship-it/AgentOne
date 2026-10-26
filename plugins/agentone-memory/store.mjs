@@ -70,8 +70,9 @@ export class MemoryStore {
     const fresh = capture && Date.now() - capture.heartbeat_ms < 15_000;
     const tracks = this.db.prepare("SELECT source,COUNT(*) segments,MIN(started_ms) earliest_ms,MAX(ended_ms) latest_ms,SUM(ended_ms-started_ms) recorded_ms FROM segments WHERE state='sealed' GROUP BY source").all();
     return {
-      capture: capture ? { state: capture.state === 'recording' && !fresh ? 'offline' : capture.state, detail: capture.detail, last_heartbeat: iso(capture.heartbeat_ms) } : { state: 'not_started' },
+      capture: capture ? { state: ['recording','listening'].includes(capture.state) && !fresh ? 'offline' : capture.state, detail: capture.detail, last_heartbeat: iso(capture.heartbeat_ms) } : { state: 'not_started' },
       mixing: this.db.prepare("SELECT value FROM meta WHERE key='mixed_input_stats'").get()?.value ? JSON.parse(this.db.prepare("SELECT value FROM meta WHERE key='mixed_input_stats'").get().value) : null,
+      capture_decision: this.db.prepare("SELECT value FROM meta WHERE key='capture_decision'").get()?.value ? JSON.parse(this.db.prepare("SELECT value FROM meta WHERE key='capture_decision'").get().value) : null,
       local_asr: this.db.prepare("SELECT value FROM meta WHERE key='local_asr_status'").get()?.value ?? 'not_reported',
       time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       tracks: tracks.map(x => ({ ...x, earliest: iso(x.earliest_ms), latest: iso(x.latest_ms) })),

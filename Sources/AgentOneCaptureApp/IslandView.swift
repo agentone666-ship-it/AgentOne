@@ -10,8 +10,8 @@ struct IslandView: View {
     @State private var showEvents = false
     @State private var expandedEventID: String?
     private let accent = Color(red: 0.55,green: 0.9,blue: 0.84)
-    private var status: String { model.demo ? "界面演示" : model.hasError ? "需要留意" : model.recording ? (model.automaticRecording ? "自动记录中" : "记录中") : "未录音" }
-    private var tint: Color { model.hasError ? .orange : model.recording ? accent : .white.opacity(0.45) }
+    private var status: String { model.demo ? "界面演示" : model.hasError ? "需要留意" : model.recording ? (model.automaticRecording ? "自动记录中" : "记录中") : model.listening ? "听候中" : "未录音" }
+    private var tint: Color { model.hasError ? .orange : model.recording ? accent : model.listening ? .cyan : .white.opacity(0.45) }
     private var notched: Bool { model.notchHeight > 0 }
     private var shape: UnevenRoundedRectangle {
         UnevenRoundedRectangle(topLeadingRadius: notched ? 0 : 20,bottomLeadingRadius: model.expanded ? 30 : 12,bottomTrailingRadius: model.expanded ? 30 : 12,topTrailingRadius: notched ? 0 : 20)
@@ -59,7 +59,7 @@ struct IslandView: View {
 
     private var hardwareHeader: some View {
         HStack {
-            Image(systemName: "waveform").font(.system(size: 12,weight: .semibold)).foregroundStyle(accent)
+            LiveAudioGlyph(levels:model.audioLevels,recording:model.recording,size:12).foregroundStyle(accent)
             Spacer(minLength: model.notchWidth)
             Circle().fill(tint).frame(width: 5,height: 5)
         }.padding(.horizontal,26).frame(height: model.notchHeight).accessibilityHidden(true)
@@ -69,17 +69,17 @@ struct IslandView: View {
             if let onExpand { onExpand() } else { model.expanded = true }
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: "waveform").font(.system(size: 15,weight: .semibold)).foregroundStyle(accent)
+                LiveAudioGlyph(levels:model.audioLevels,recording:model.recording,size:15).foregroundStyle(accent)
                 if notched { Spacer(minLength: model.notchWidth) }
                 else { Text("AgentOne").font(.system(size: 12,weight: .semibold)); Spacer() }
                 Circle().fill(tint).frame(width: 5,height: 5)
                 if !notched { Text(status).font(.system(size: 10)).foregroundStyle(.white.opacity(0.55)) }
             }.padding(.horizontal,20).frame(maxWidth: .infinity,maxHeight: .infinity).contentShape(Rectangle())
-        }.buttonStyle(.plain).accessibilityLabel("AgentOne，\(status)，展开声音记忆")
+        }.buttonStyle(.plain).accessibilityLabel("AgentOne，\(status)，展开声音记忆").accessibilityValue(model.recording ? "录音音量 \(Int((model.audioLevels.last ?? 0)*100))%" : model.listening ? "听候中" : "已暂停")
     }
     private var expandedHeader: some View {
         HStack(spacing: 10) {
-            Image(systemName: "waveform").font(.system(size: 20,weight: .medium)).foregroundStyle(accent)
+            LiveAudioGlyph(levels:model.audioLevels,recording:model.recording,size:20).foregroundStyle(accent)
                 .frame(width: 38,height: 38).background(accent.opacity(0.1),in: RoundedRectangle(cornerRadius: 12))
             VStack(alignment: .leading,spacing: 3) {
                 Text("AgentOne").font(.system(size: 15,weight: .semibold))
@@ -98,20 +98,20 @@ struct IslandView: View {
         VStack(alignment: .leading,spacing: 16) {
             HStack {
                 VStack(alignment: .leading,spacing: 6) {
-                    Text(model.recording ? "正在保留今天的声音" : model.hasError ? "自动记录需要处理" : "让记忆从这里开始").font(.system(size: 22,weight: .semibold))
+                    Text(model.recording ? "正在保留今天的声音" : model.listening ? "正在听候新的声音" : model.hasError ? "自动记录需要处理" : "让记忆从这里开始").font(.system(size: 22,weight: .semibold))
                     Text("声音、时间、地点，留给未来的你。").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
                 }
                 Spacer()
             }
             VStack(alignment:.leading,spacing:12) {
                 HStack {
-                    Image(systemName:"waveform").font(.system(size:20)).foregroundStyle(accent)
+                    LiveAudioGlyph(levels:model.audioLevels,recording:model.recording,size:20).foregroundStyle(accent)
                     Text("系统声音 ＋ 麦克风").font(.system(size:13,weight:.medium))
                     Spacer()
                     Text("合并录音").font(.system(size:10)).foregroundStyle(accent)
                 }
                 Text("保存为一条录音，回放和回忆都在一起。").font(.system(size:11)).foregroundStyle(.white.opacity(0.45))
-                if model.recording {
+                if model.listening {
                     HStack(spacing:12) {
                         Label(model.systemReceiving ? "电脑声音已接入" : "等待电脑声音",systemImage:"speaker.wave.2")
                         Label(model.microphoneReceiving ? "麦克风已接入" : "等待麦克风",systemImage:"mic")
@@ -123,11 +123,11 @@ struct IslandView: View {
                 TextField("添加地点，例如：工位",text: $model.place).textFieldStyle(.plain).onChange(of: model.place) { _,_ in model.updateMetadata() }
             }.font(.system(size: 11)).padding(11).background(.white.opacity(0.045),in: RoundedRectangle(cornerRadius: 10))
             Button { model.toggleRecording() } label: {
-                HStack(spacing: 8) { Image(systemName: model.recording ? "pause.fill" : "record.circle"); Text(model.busy ? "正在启动…" : model.recording ? "暂停记录" : model.automaticRecording ? "恢复自动记录" : "开启录音") }
+                HStack(spacing: 8) { Image(systemName: model.listening ? "pause.fill" : "record.circle"); Text(model.busy ? "正在启动…" : model.listening ? "暂停记录" : model.automaticRecording ? "恢复自动记录" : "开启录音") }
                     .font(.system(size: 13,weight: .semibold)).foregroundStyle(.black).frame(maxWidth: .infinity).padding(.vertical,12)
                     .background(accent,in: Capsule())
             }.buttonStyle(.plain).disabled(model.busy || model.demo)
-            Text(model.message).font(.system(size: 10)).foregroundStyle(model.hasError ? .orange : .white.opacity(0.4)).lineLimit(2).fixedSize(horizontal: false,vertical: true)
+            Text(model.listening ? model.decisionStatus : model.message).font(.system(size: 10)).foregroundStyle(model.hasError ? .orange : .white.opacity(0.4)).lineLimit(2).fixedSize(horizontal: false,vertical: true)
             Spacer(minLength: 0)
         }
     }
@@ -212,7 +212,7 @@ struct IslandView: View {
                     Text(model.eventCaptureStatus).font(.system(size:10)).foregroundStyle(.white.opacity(0.4))
                     Button("检查事件详情权限") {model.eventService?.requestDetailsPermission()}.font(.system(size:10))
                     Toggle("自动记录声音",isOn: Binding(get: {model.automaticRecording},set: {model.setAutomaticRecording($0)}))
-                    Text("授权后自动合并记录电脑声音和麦克风；不丢弃安静片段。手动暂停后保持暂停。").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
+                    Text("Laya 在本机判断录音或听候；听候只保留 10 秒内存预录。判断失败时保留声音，手动暂停后保持暂停。").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
                     Toggle("登录后自动启动",isOn: Binding(get: {model.autoResume},set: {model.setAutoResume($0)}))
                     HStack {
                         Text(model.loginStatus).font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))

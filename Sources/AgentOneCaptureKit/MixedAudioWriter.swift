@@ -19,6 +19,8 @@ public final class MixedAudioWriter: @unchecked Sendable {
     private let sessionID: String
     private let segmentSeconds: Double
     private let metadata: @Sendable () -> (String?,String)
+    private let onActivity: @Sendable (AudioActivityReading?) -> Void
+    private let decisionStatus: RecordingDecisionStatus?
     private var blocks: [Int64:Block] = [:]
     private var cursor: Int64?
     private var latest: Int64 = 0
@@ -31,10 +33,19 @@ public final class MixedAudioWriter: @unchecked Sendable {
     private let format = AVAudioFormat(standardFormatWithSampleRate:sampleRate,channels:2)!
     private lazy var writer = AudioTrackWriter(database:database,source:"mixed",sessionID:sessionID,wallAnchor:wall,hostAnchor:host,segmentSeconds:segmentSeconds,
         finishingContext: { [weak self] in self?.mixingContext() ?? "{}" },metadata:metadata)
+    private lazy var gate = decisionStatus.map { status in RecordingGate(status:status,
+        write:{[unowned self] buffer,pts in try self.writer.append(buffer,presentationSeconds:pts)},
+        seal:{[unowned self] in try self.writer.finish()},
+        gap:{[unowned self] start,end in try self.database.addGap(started:self.wall.addingTimeInterval(start-self.host),ended:self.wall.addingTimeInterval(end-self.host),source:"mixed",reason:"laya_wait")}) }
+    public func applyDecision(_ decision:RecordingDecision?,quietSeconds:Double,inputsReady:Bool) throws {
+        guard !closed else {return}
+        // The last emitted output is behind the device clock by the jitter buffer.
+        try gate?.apply(decision,quietSeconds:quietSeconds,inputsReady:inputsReady,now:host+Double(cursor ?? 0)/Self.sampleRate)
+    }
     public var sealedCount: Int { writer.sealedCount }
 
-    public init(database:MemoryDatabase,sessionID:String,wallAnchor:Date,hostAnchor:Double,segmentSeconds:Double = 60,metadata:@escaping @Sendable () -> (String?,String) = {(nil,"{}")}) {
-        self.database=database;self.sessionID=sessionID;wall=wallAnchor;host=hostAnchor;self.segmentSeconds=segmentSeconds;self.metadata=metadata
+    public init(database:MemoryDatabase,sessionID:String,wallAnchor:Date,hostAnchor:Double,segmentSeconds:Double = 60,decisionStatus:RecordingDecisionStatus? = nil,onActivity:@escaping @Sendable (AudioActivityReading?) -> Void = {_ in},metadata:@escaping @Sendable () -> (String?,String) = {(nil,"{}")}) {
+        self.onActivity=onActivity;self.decisionStatus=decisionStatus;self.database=database;self.sessionID=sessionID;wall=wallAnchor;host=hostAnchor;self.segmentSeconds=segmentSeconds;self.metadata=metadata
     }
     public func consume(_ sample:CMSampleBuffer,source:String) throws {
         if let packet=try AudioTrackWriter.decodePCM(sample) {try append(packet.buffer,source:source,presentationSeconds:packet.presentationSeconds)}
@@ -50,7 +61,17 @@ public final class MixedAudioWriter: @unchecked Sendable {
         guard end>0 else {return} // Samples from before this recording session.
         if cursor==nil {cursor=max(0,start)}
         if !written {cursor=min(cursor!,max(0,start))}
-        guard end-(cursor ?? 0)<=Int64(Self.sampleRate*8) else {throw CaptureFailure.message("音频输入时钟偏移过大，已停止以免混错时间")}
+        if end-(cursor ?? 0)>Int64(Self.sampleRate*8) {
+            let arrival=CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()))
+            // A delayed timer/slow device start is not a clock jump. Catch up on the
+            // timestamp of this packet, leaving the same jitter window for the other input.
+            if pts<=arrival+1,pts>=arrival-30 {try flush(throughHostSeconds:pts-Self.latency)}
+        }
+        guard end-(cursor ?? 0)<=Int64(Self.sampleRate*8) else {
+            let lag=Double(end-(cursor ?? 0))/Self.sampleRate
+            let clock=pts-CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()))
+            throw CaptureFailure.message(String(format:"音频时钟异常（缓冲 %.1f 秒，时差 %.1f 秒），已停止以免混错时间",lag,clock))
+        }
         let first=max(max(0,start),cursor ?? 0)
         lateFrames[source,default:0] += max(0,min(end,cursor ?? 0)-max(0,start))
         guard first<end else {return}
@@ -122,7 +143,9 @@ public final class MixedAudioWriter: @unchecked Sendable {
                 }
                 if offset==Self.blockFrames-1 {blocks.removeValue(forKey:key)}
             }
-            try writer.append(buffer,presentationSeconds:host+Double(position)/Self.sampleRate)
+            onActivity(AudioActivityReading.measure(buffer))
+            let pts=host+Double(position)/Self.sampleRate
+            if let gate {try gate.consume(buffer,pts:pts)} else {try writer.append(buffer,presentationSeconds:pts)}
             written=true;position += Int64(count);cursor=position
         }
     }
@@ -133,7 +156,7 @@ public final class MixedAudioWriter: @unchecked Sendable {
             try flush(throughHostSeconds:host+Double(end)/Self.sampleRate)
             for (source,start) in missingStarts {try gap(source:source,start:start,end:end)}
         }
-        try writer.finish();closed=true;blocks.removeAll();missingStarts.removeAll()
+        if let gate {try gate.finish(now:host+Double(cursor ?? 0)/Self.sampleRate)} else {try writer.finish()};closed=true;blocks.removeAll();missingStarts.removeAll()
         try database.execute("INSERT INTO meta VALUES ('mixed_input_stats',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[mixingContext()])
     }
     private func gap(source:String,start:Int64,end:Int64) throws {
@@ -141,7 +164,7 @@ public final class MixedAudioWriter: @unchecked Sendable {
         try database.addGap(started:wall.addingTimeInterval(Double(start)/Self.sampleRate),ended:wall.addingTimeInterval(Double(end)/Self.sampleRate),source:source,reason:"mixed_input_no_samples")
     }
     private func mixingContext() -> String {
-        let value:[String:Any] = ["recording_mode":"mixed","inputs":["system_audio","microphone"],"mixing":["sample_rate":Self.sampleRate,"channels":2,"system_gain":0.5,"microphone_gain":0.5,"jitter_buffer_seconds":Self.latency,"late_frames":lateFrames,"input_frames":sourceFrames,"unavailable_input_frames":unavailableFrames,"statistics_scope":"session_cumulative","resampling":"host_timestamp_linear","echo_cancellation":false]]
+        let value:[String:Any] = ["decision_policy":decisionStatus == nil ? "continuous" : "laya_with_retention_fallback","recording_mode":"mixed","inputs":["system_audio","microphone"],"mixing":["sample_rate":Self.sampleRate,"channels":2,"system_gain":0.5,"microphone_gain":0.5,"jitter_buffer_seconds":Self.latency,"late_frames":lateFrames,"input_frames":sourceFrames,"unavailable_input_frames":unavailableFrames,"statistics_scope":"session_cumulative","resampling":"host_timestamp_linear","echo_cancellation":false]]
         return (try? JSONSerialization.data(withJSONObject:value,options:[.sortedKeys])).map {String(decoding:$0,as:UTF8.self)} ?? "{}"
     }
 }

@@ -117,6 +117,10 @@ test('capture heartbeat freshness distinguishes stopped capture from a live reco
     assert.equal(f.store.status().capture.state,'offline');
     f.store.db.prepare('UPDATE capture_state SET heartbeat_ms=?').run(Date.now());
     assert.equal(f.store.status().capture.state,'recording');
+    f.store.db.prepare("UPDATE capture_state SET state='listening',heartbeat_ms=0").run();
+    assert.equal(f.store.status().capture.state,'offline');
+    f.store.db.prepare('UPDATE capture_state SET heartbeat_ms=?').run(Date.now());
+    assert.equal(f.store.status().capture.state,'listening');
   } finally {f.close()}
 });
 

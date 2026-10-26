@@ -1,0 +1,100 @@
+{
+  "kind": "synthetic_descriptive_state_not_audio_accuracy",
+  "model": "convaiinnovations/laya/multilingual",
+  "revision": "7b928d828b7b0e022f929d9bd2e44165aa270148",
+  "runtime": "laya==0.4.12",
+  "holdout": true,
+  "controlled_correct": 7,
+  "correct": 4,
+  "total": 8,
+  "rows": [
+    {
+      "controlled": "wait",
+      "case": "quiet_minute",
+      "current": "正在保存混合录音",
+      "expected": "wait",
+      "id": "quiet_minute",
+      "choice": "wait",
+      "confidence": 0.9428,
+      "entropy_confidence": 0.6838,
+      "latency_ms": 285.3
+    },
+    {
+      "controlled": "record",
+      "case": "coworker_speech",
+      "current": "正在保存混合录音",
+      "expected": "record",
+      "id": "coworker_speech",
+      "choice": "wait",
+      "confidence": 0.5234,
+      "entropy_confidence": 0.0016,
+      "latency_ms": 68.5
+    },
+    {
+      "controlled": "record",
+      "case": "video",
+      "current": "正在保存混合录音",
+      "expected": "record",
+      "id": "video",
+      "choice": "record",
+      "confidence": 0.529,
+      "entropy_confidence": 0.0024,
+      "latency_ms": 75.1
+    },
+    {
+      "controlled": "record",
+      "case": "mic_disconnected",
+      "current": "正在保存混合录音",
+      "expected": "record",
+      "id": "mic_disconnected",
+      "choice": "record",
+      "confidence": 0.6711,
+      "entropy_confidence": 0.0862,
+      "latency_ms": 68.1
+    },
+    {
+      "controlled": "record",
+      "case": "quiet_30",
+      "current": "正在保存混合录音",
+      "expected": "wait",
+      "id": "quiet_30",
+      "choice": "record",
+      "confidence": 0.5938,
+      "entropy_confidence": 0.0255,
+      "latency_ms": 56.9
+    },
+    {
+      "controlled": "record",
+      "case": "pause_2",
+      "current": "正在保存混合录音",
+      "expected": "record",
+      "id": "pause_2",
+      "choice": "wait",
+      "confidence": 0.7782,
+      "entropy_confidence": 0.2366,
+      "latency_ms": 55.5
+    },
+    {
+      "controlled": "record",
+      "case": "system_lost",
+      "current": "正在保存混合录音",
+      "expected": "record",
+      "id": "system_lost",
+      "choice": "record",
+      "confidence": 0.6072,
+      "entropy_confidence": 0.0334,
+      "latency_ms": 61.8
+    },
+    {
+      "controlled": "record",
+      "case": "pause_5",
+      "current": "正在保存混合录音",
+      "expected": "record",
+      "id": "pause_5",
+      "choice": "wait",
+      "confidence": 0.8882,
+      "entropy_confidence": 0.4948,
+      "latency_ms": 81.6
+    }
+  ]
+}

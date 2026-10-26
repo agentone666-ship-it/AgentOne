@@ -30,13 +30,15 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
     let queue = DispatchQueue(label: "life.agentone.audio-writer", qos: .utility)
     let mixed: MixedAudioWriter
     let activity: CaptureActivityMeter
+    let decisionStatus: RecordingDecisionStatus
+    let database: MemoryDatabase
     let onFailure: @Sendable (String) -> Void
     private var timer: DispatchSourceTimer?
-    private var failed = false
-    init(database: MemoryDatabase, metadata: CaptureMetadata, activity: CaptureActivityMeter, onFailure: @escaping @Sendable (String) -> Void) {
+    fileprivate var failed = false
+    init(database: MemoryDatabase, metadata: CaptureMetadata, activity: CaptureActivityMeter, decisionStatus: RecordingDecisionStatus, onFailure: @escaping @Sendable (String) -> Void) {
         let host = CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()))
-        mixed = MixedAudioWriter(database:database,sessionID:UUID().uuidString,wallAnchor:Date(),hostAnchor:host,metadata:{metadata.snapshot()})
-        self.activity=activity;self.onFailure=onFailure
+        mixed = MixedAudioWriter(database:database,sessionID:UUID().uuidString,wallAnchor:Date(),hostAnchor:host,decisionStatus:decisionStatus,onActivity:{activity.observe($0,source:"mixed")},metadata:{metadata.snapshot()})
+        self.database=database;self.decisionStatus=decisionStatus;self.activity=activity;self.onFailure=onFailure
     }
     func beginMixing() {
         queue.async {
@@ -88,6 +90,8 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
     public private(set) var isRecording = false
     public let metadata = CaptureMetadata()
     public let activity = CaptureActivityMeter()
+    public private(set) var decisionStatus = RecordingDecisionStatus()
+    public private(set) var sessionToken = UUID()
     private let database: MemoryDatabase
     private var stream: SCStream?
     private var sink: AudioStreamSink?
@@ -119,7 +123,8 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
             guard let display = content.displays.first else { throw CaptureFailure.message("没有可用显示器，无法启动系统音采集") }
             try database.recoverInterruptedSegments()
-            let output = AudioStreamSink(database: database, metadata: metadata, activity: activity) { [weak self] message in
+            activity.reset();decisionStatus=RecordingDecisionStatus();sessionToken=UUID()
+            let output = AudioStreamSink(database: database, metadata: metadata, activity: activity, decisionStatus:decisionStatus) { [weak self] message in
                 Task { @MainActor in self?.onFailure?(message) }
             }
             let configuration = SCStreamConfiguration()
@@ -134,13 +139,15 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             // Consume/discard tiny screen frames to avoid SCStream output errors; never save them.
             try capture.addStreamOutput(output, type: .screen, sampleHandlerQueue: output.queue)
             sink = output; stream = capture
+            output.beginMixing()
             try await capture.startCapture()
             let microphone = MicrophoneInput(deliver: { buffer,pts in output.enqueueMicrophone(buffer,presentationSeconds: pts) },fail: { [weak self] message in
                 Task { @MainActor in self?.onFailure?(message) }
             })
             microphoneInput = microphone
             try microphone.start()
-            output.beginMixing()
+            let failed=output.queue.sync {output.failed}
+            guard !failed,sink === output else {throw CaptureFailure.message("音频在启动期间中断，请重试")}
             try database.execute("UPDATE coverage SET ended_ms=? WHERE ended_ms IS NULL", [MemoryDatabase.now])
             isRecording = true
             try database.setCaptureState("recording", detail: "mixed(system_audio+microphone)")
@@ -180,9 +187,26 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
         }
     }
 
+    public func applyDecision(_ decision:RecordingDecision?,session:UUID) {
+        guard isRecording,session==sessionToken,let sink else {return}
+        let quiet=activity.quietSeconds(),ready=activity.hasSamples(source:"system_audio",maxAge:1) && activity.hasSamples(source:"microphone",maxAge:1)
+        sink.queue.async {
+            guard !sink.failed else {return}
+            do {
+                try sink.mixed.applyDecision(decision,quietSeconds:quiet,inputsReady:ready)
+                let state=sink.decisionStatus.snapshot
+                let value:[String:Any]=["model":"convaiinnovations/laya/multilingual","choice":decision?.choice ?? "unavailable","answer_probability":decision?.confidence ?? 0,"saving":state.saving,"quiet_seconds":quiet,"inputs_ready":ready,"observed_ms":MemoryDatabase.now]
+                let json=String(decoding:try JSONSerialization.data(withJSONObject:value),as:UTF8.self)
+                try sink.database.execute("INSERT INTO meta VALUES ('capture_decision',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[json])
+            }
+            catch {sink.onFailure("录音决策切换失败："+error.localizedDescription)}
+        }
+    }
+
     public func heartbeat() throws {
         guard isRecording else { return }
-        try database.setCaptureState("recording", detail: "mixed(system_audio+microphone)")
+        let state=decisionStatus.snapshot
+        try database.setCaptureState(state.saving ? "recording" : "listening", detail: state.detail)
     }
 
     private func releaseLock() {

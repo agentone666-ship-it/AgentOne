@@ -42,6 +42,8 @@ for resource in server.mjs store.mjs recall.mjs schema.sql migrate-v2.sql README
     cp "$project_dir/plugins/agentone-memory/$resource" "$plugin_resources/$resource"
 done
 
+cp "$project_dir/tools/laya-decision/worker.py" "$contents_dir/Resources/laya-worker.py"
+
 cat > "$contents_dir/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">

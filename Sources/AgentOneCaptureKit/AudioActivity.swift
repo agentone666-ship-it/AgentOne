@@ -55,21 +55,37 @@ public final class CaptureActivityMeter: @unchecked Sendable {
     private let lock = NSLock()
     private var lastSound: [String: TimeInterval] = [:]
     private var lastSample: [String: TimeInterval] = [:]
+    private var readings: [String: (Double,TimeInterval)] = [:]
+    private var firstSample: TimeInterval?
     public init() {}
     public func observe(_ reading: AudioActivityReading?, source: String, now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        guard let reading,reading.rmsDBFS.isFinite else {return}
         lock.lock(); defer { lock.unlock() }
         lastSample[source] = now
-        if reading?.hasSound == true { lastSound[source] = now }
+        if firstSample == nil { firstSample = now }
+        readings[source] = (reading.rmsDBFS,now)
+        if reading.hasSound { lastSound[source] = now }
     }
     public func hasSound(source: String, now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
         lock.lock(); defer { lock.unlock() }
         guard let observed = lastSound[source] else { return false }
         return now >= observed && now - observed < 3.5
     }
-    public func hasSamples(source: String, now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
+    public func hasSamples(source: String, now: TimeInterval = ProcessInfo.processInfo.systemUptime, maxAge:Double = 10) -> Bool {
         lock.lock(); defer { lock.unlock() }
         guard let observed = lastSample[source] else { return false }
-        return now >= observed && now - observed < 10
+        return now >= observed && now - observed < maxAge
     }
-    public func reset() { lock.lock(); defer { lock.unlock() }; lastSound.removeAll(); lastSample.removeAll() }
+    /// Actual PCM amplitude with a short release envelope. No periodic or random animation.
+    public func level(source: String, now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Double {
+        lock.lock(); defer { lock.unlock() }
+        guard let (db,time) = readings[source],now >= time else { return 0 }
+        return min(1,max(0,(db+60)/54)) * max(0,1-max(0,now-time-0.12)/0.4)
+    }
+    public func quietSeconds(now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Double {
+        lock.lock(); defer { lock.unlock() }
+        let last = lastSound.values.max() ?? firstSample ?? now
+        return max(0,now-last)
+    }
+    public func reset() { lock.lock(); defer { lock.unlock() }; lastSound.removeAll(); lastSample.removeAll(); readings.removeAll(); firstSample = nil }
 }

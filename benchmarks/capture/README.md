@@ -1,0 +1,22 @@
+# Capture decision benchmark
+
+固定模型 `convaiinnovations/laya/multilingual` revision `7b928d828b7b0e022f929d9bd2e44165aa270148`，SDK `laya==0.4.12`，本机 CPU。输入为合成声音状态描述，不包含用户音频，不衡量 VAD、ASR 或真实场景漏录率。
+
+| 数据 | 模型原始选择 | 加入保护后的选择 |
+|---|---:|---:|
+| 原始复杂提示词 baseline | 1/12 | 未启用 |
+| 中性 A/B 与精简输入 candidate | 10/12 | 12/12 |
+| 未用来选择提示词的不同措辞 holdout | 4/8 | 7/8 |
+
+candidate 实际是 6 种声音状态 × 2 种当前录音状态。精简后的模型只接收声音状态，所以两组不是独立样本。holdout 保留一个静音没有进入听候的失败案例；系统仍保存声音，属于保守多录。短暂停顿曾被模型错误建议听候，保护层拒绝。
+
+保护层：只允许 `wait` 且所选答案概率 ≥0.75、静音 ≥15 秒、双输入已接入、录音至少 15 秒、连续两次 wait，才暂停写文件。低分、未知或错误继续保存。0.75 是工程门限，未做概率校准；SDK `answer_confidence` 是所选答案概率，旧字段 `confidence` 是归一化熵，不能互换。`action.act_probability` 不参与控制。
+
+```bash
+bash scripts/setup_laya.sh
+python3 benchmarks/capture/run.py
+python3 benchmarks/capture/run.py --holdout
+swift test --filter 'RecordingDecisionTests|MixedAudioTests'
+```
+
+报告输出到 `build/benchmarks/`；此目录中的 baseline/candidate/holdout 是本次实测快照。保护后的分数只检查稳定决策应当采用的分支，不替代时间状态机测试，也不证明真实说话开头一定保全。原始模型表现仍不足以单独控制录音，后续应使用真实授权场景采样做专项评估/微调。

@@ -13,9 +13,12 @@ import SwiftUI
     @Published var notchHeight: CGFloat = 0
     @Published var notchWidth: CGFloat = 0
     @Published var recording = false
+    @Published var listening = false
+    @Published var audioLevels = [Double](repeating:0,count:5)
+    @Published var decisionStatus = "Laya 尚未启动"
     @Published var busy = false
     @Published var hasError = false
-    @Published var message = "自动合并电脑声音与麦克风；声音和安静片段都会保留"
+    @Published var message = "自动合并电脑声音与麦克风，由本机 Laya 辅助决定录音或听候"
     @Published var automaticRecording = (UserDefaults.standard.object(forKey: "vNext.automaticRecording") as? Bool) ?? true
     @Published var systemReceiving = false
     @Published var microphoneReceiving = false
@@ -47,6 +50,9 @@ import SwiftUI
     private var suspended: Bool { sleeping || (locked && pauseOnLock) }
     private var observers: [NSObjectProtocol] = []
     private var polling: Task<Void,Never>?
+    private var metering:Task<Void,Never>?
+    private var decisions:Task<Void,Never>?
+    private let laya=LayaDecisionClient()
 
     private init() {
         let root = demo ? FileManager.default.temporaryDirectory.appendingPathComponent("agentone-island-demo-\(UUID().uuidString)") : MemoryDatabase.defaultRoot
@@ -92,6 +98,39 @@ import SwiftUI
                 do { try await Task.sleep(for: .seconds(3)) } catch { return }
             }
         }
+        let developmentWorker=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/AgentOne/Laya/laya-worker.py")
+        if let workerURL=Bundle.main.url(forResource:"laya-worker",withExtension:"py") ?? (FileManager.default.fileExists(atPath:developmentWorker.path) ? developmentWorker:nil) {laya.start(workerURL:workerURL)}
+        else {decisionStatus="Laya 组件缺失，继续保留声音"}
+        metering=Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else {return}
+                let active=self.service?.isRecording == true
+                if self.listening != active {self.listening=active}
+                let saving=active && (self.service?.decisionStatus.snapshot.saving ?? false)
+                if self.recording != saving {self.recording=saving}
+                let level=self.recording ? self.service?.activity.level(source:"mixed") ?? 0:0
+                let levels=Array(self.audioLevels.suffix(4))+[level]
+                if self.audioLevels != levels {self.audioLevels=levels}
+                do {try await Task.sleep(for:.milliseconds(80))} catch {return}
+            }
+        }
+        decisions=Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else {return}
+                if let service=self.service,service.isRecording {
+                    let token=service.sessionToken,quiet=service.activity.quietSeconds()
+                    let ready=service.activity.hasSamples(source:"system_audio",maxAge:1) && service.activity.hasSamples(source:"microphone",maxAge:1)
+                    let state=["声音状态":ready ? quiet<3.5 ? "当前有声音活动":"电脑和麦克风持续安静，已持续 \(Int(quiet)) 秒":"输入尚未完全就绪，声音情况未知",
+                               "当前状态":service.decisionStatus.snapshot.saving ? "正在保存混合录音":"听候新声音，内存有 10 秒预录",
+                               "用户偏好":"尽可能保留信息；声音或状态不确定时应保存"]
+                    let decision=await self.laya.decide(state:state)
+                    guard !Task.isCancelled else {return}
+                    service.applyDecision(decision,session:token)
+                    self.decisionStatus=self.laya.status+" · "+service.decisionStatus.snapshot.detail
+                }
+                do {try await Task.sleep(for:.seconds(2))} catch {return}
+            }
+        }
         syncLegacyEvents()
         if localASR && SFSpeechRecognizer.authorizationStatus() == .notDetermined {enableASR()}
         if autoResume { setAutoResume(true) }
@@ -111,7 +150,7 @@ import SwiftUI
 
     func toggleRecording() {
         guard !demo, !busy else { return }
-        if recording { pauseRecording() }
+        if listening { pauseRecording() }
         else {
             desiredRecording = true
             UserDefaults.standard.set(true,forKey: "vNext.permissionSetupAttempted")
@@ -133,12 +172,13 @@ import SwiftUI
         do {
             try await service.start(allowPermissionPrompts: prompts)
             if suspended || !desiredRecording { try await service.stop(reason: "start_cancelled"); return }
-            recording = service.isRecording
+            listening = service.isRecording
+            recording = service.isRecording && service.decisionStatus.snapshot.saving
             if eventCaptureEnabled { eventService?.start() }
             hasError = false
             UserDefaults.standard.set(true, forKey: "vNext.captureConsent")
             UserDefaults.standard.set(true, forKey: "vNext.captureDesired")
-            message = automaticRecording ? "自动保存一条混合录音，安静片段也保留；可随时暂停" : "系统音与麦克风合并保存 · 原音访问需单独开启"
+            message = automaticRecording ? "Laya 决定何时保存；听候时保留 10 秒预录，判断失败时继续录音" : "系统音与麦克风合并保存 · 原音访问需单独开启"
         } catch {
             hasError = true
             if !automaticRecording { desiredRecording = false; UserDefaults.standard.set(false,forKey: "vNext.captureDesired") }
@@ -152,7 +192,7 @@ import SwiftUI
         eventService?.stop()
         do { try await service?.stop(reason: reason) }
         catch { message = "录音已停止，但末段封口失败；原文件保留为待恢复" }
-        recording = false
+        listening = false;recording = false;audioLevels=[Double](repeating:0,count:5)
         systemHasSound = false; microphoneHasSound = false
         systemReceiving = false; microphoneReceiving = false
         if reason == "user_paused" { message = "已手动暂停，不会自行恢复。点击恢复自动记录即可继续。" }
@@ -162,7 +202,7 @@ import SwiftUI
 
     func prepareForExit() async {
         desiredRecording = false // Cancel an in-flight permission/start request.
-        polling?.cancel()
+        polling?.cancel();metering?.cancel();decisions?.cancel();laya.stop()
         await stop(reason: "application_exit")
         worker?.releaseOwnLeases()
     }
@@ -253,10 +293,10 @@ import SwiftUI
     func refresh() {
         guard let database, !demo else { return }
         updateMetadata()
-        systemReceiving = recording && (service?.activity.hasSamples(source: "system_audio") ?? false)
-        microphoneReceiving = recording && (service?.activity.hasSamples(source: "microphone") ?? false)
-        systemHasSound = recording && (service?.activity.hasSound(source: "system_audio") ?? false)
-        microphoneHasSound = recording && (service?.activity.hasSound(source: "microphone") ?? false)
+        systemReceiving = listening && (service?.activity.hasSamples(source: "system_audio") ?? false)
+        microphoneReceiving = listening && (service?.activity.hasSamples(source: "microphone") ?? false)
+        systemHasSound = listening && (service?.activity.hasSound(source: "system_audio") ?? false)
+        microphoneHasSound = listening && (service?.activity.hasSound(source: "microphone") ?? false)
         do {
             try database.execute("INSERT INTO meta VALUES ('local_asr_status',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[worker?.status ?? "本机转写不可用"])
             eventCaptureStatus=eventService?.status ?? "事件服务不可用"
