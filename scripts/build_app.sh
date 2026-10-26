@@ -5,7 +5,7 @@ script_dir="${0:A:h}"
 project_dir="${script_dir:h}"
 configuration="${1:-debug}"
 # A single product version feeds local bundles, CI artifacts and release tags.
-app_version="$(cd "$project_dir/AgentOneLifeRuntime" && node -p 'require("./package.json").version')"
+app_version="$(cat "$project_dir/VERSION")"
 build_number="${AGENTONE_BUILD_NUMBER:-1}"
 if [[ ! "$app_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || ! "$build_number" =~ ^[0-9]+$ ]]; then
     echo "App version must be X.Y.Z and build number must be numeric." >&2
@@ -23,40 +23,28 @@ cleanup() {
 trap cleanup EXIT
 
 cd "$project_dir"
-swift build -c "$configuration"
+swift build -c "$configuration" --product AgentOne
 
 binary_path="$(swift build -c "$configuration" --show-bin-path)/AgentOne"
 mkdir -p "$contents_dir/MacOS" "$contents_dir/Resources"
 cp "$binary_path" "$contents_dir/MacOS/AgentOne"
 
-# SwiftPM resource bundle (LifeForm artwork etc.) must ship inside the .app,
-# otherwise Bundle.module lookups fail at runtime.
-resource_bundle="$(swift build -c "$configuration" --show-bin-path)/AgentOne_AgentOneApp.bundle"
+# Only the new CaptureKit resource bundle ships; the legacy Agent runtime and
+# its LifeForm/chat resources stay out of the default distribution.
+resource_bundle="$(swift build -c "$configuration" --show-bin-path)/AgentOne_AgentOneCaptureKit.bundle"
 if [[ -d "$resource_bundle" ]]; then
     cp -R "$resource_bundle" "$contents_dir/Resources/"
 fi
 
-life_runtime_source="$project_dir/AgentOneLifeRuntime/src/index.ts"
-life_runtime_resources="$contents_dir/Resources/AgentOneLifeRuntime"
-if [[ -f "$life_runtime_source" ]] && command -v deno >/dev/null 2>&1; then
-    if [[ ! -d "$project_dir/AgentOneLifeRuntime/node_modules/@earendil-works/pi-agent-core" ]]; then
-        echo "AgentOneLifeRuntime dependencies are missing. Run npm install in AgentOneLifeRuntime." >&2
-        exit 1
-    fi
-    mkdir -p "$life_runtime_resources"
-    deno compile \
-        --quiet \
-        --no-check \
-        --sloppy-imports \
-        --node-modules-dir=manual \
-        --allow-env=AGENTONE_MODEL_ROUTE,AGENTONE_MODEL_PROVIDER,AGENTONE_OLLAMA_BASE_URL,AGENTONE_KIMI_ACCESS_TOKEN,AGENTONE_KIMI_BASE_URL,AGENTONE_KIMI_PLATFORM,AGENTONE_KIMI_VERSION,AGENTONE_KIMI_DEVICE_NAME,AGENTONE_KIMI_DEVICE_MODEL,AGENTONE_KIMI_OS_VERSION,AGENTONE_KIMI_DEVICE_ID,OPENAI_API_KEY,AGENTONE_MODEL_ID,AGENTONE_OPENAI_BASE_URL,AGENTONE_PI_PROTOCOL_VERSION,PI_CACHE_RETENTION,OPENAI_BASE_URL,OPENAI_ORG_ID,OPENAI_PROJECT_ID,OPENAI_WEBHOOK_SECRET,OPENAI_LOG,ANTHROPIC_LOG,HTTP_PROXY,HTTPS_PROXY,http_proxy,https_proxy \
-        --allow-net \
-        --output "$life_runtime_resources/agentone-life-runtime" \
-        "$life_runtime_source"
-elif [[ -f "$life_runtime_source" ]]; then
-    echo "Deno is required to create the self-contained Pi sidecar." >&2
-    exit 1
-fi
+plugin_resources="$contents_dir/Resources/agentone-memory"
+mkdir -p "$plugin_resources"
+for resource in server.mjs store.mjs recall.mjs schema.sql migrate-v2.sql README.md plugin.json mcp.json .mcp.json; do
+    cp "$project_dir/plugins/agentone-memory/$resource" "$plugin_resources/$resource"
+done
+
+cp -R "$project_dir/plugins/agentone-memory/.codex-plugin" "$project_dir/plugins/agentone-memory/skills" "$plugin_resources/"
+
+cp "$project_dir/tools/laya-decision/worker.py" "$contents_dir/Resources/laya-worker.py"
 
 cat > "$contents_dir/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -78,29 +66,25 @@ cat > "$contents_dir/Info.plist" <<'PLIST'
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+    <string>15.0</string>
     <key>LSUIElement</key>
-    <false/>
-    <key>NSAppleEventsUsageDescription</key>
-    <string>AgentOne uses app context only when you enable it, so it can understand and restore your current task.</string>
+    <true/>
+    <key>NSLocationUsageDescription</key>
+    <string>AgentOne uses system location to automatically attach a place, accuracy and sample time to your local recordings and activity memory.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>AgentOne automatically adds your system location to local recording memory.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>AgentOne uses the microphone only during a conversation mode you explicitly start.</string>
+    <string>AgentOne automatically mixes microphone input with system audio into one recording for your personal audio memory after you grant permission. You can pause automatic recording from the island.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>AgentOne automatically records system audio as local memory after you grant permission. You can pause automatic recording at any time.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>AgentOne uses on-device speech recognition only when you enable local transcription. Unsupported on-device recognition remains queued.</string>
     <key>NSScreenCaptureDescription</key>
-    <string>AgentOne captures selected key moments for your private daily replay when you grant permission.</string>
+    <string>AgentOne uses ScreenCaptureKit for local system audio. This version does not save screen video.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsArbitraryLoads</key>
         <false/>
-        <key>NSExceptionDomains</key>
-        <dict>
-            <key>algoagent.zhuaninc.com</key>
-            <dict>
-                <key>NSIncludesSubdomains</key>
-                <false/>
-                <key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
-                <true/>
-            </dict>
-        </dict>
     </dict>
 </dict>
 </plist>

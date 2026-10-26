@@ -1,0 +1,586 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agentone:memory-contract:0.1-draft",
+  "title": "AgentOne evidence-first audio memory design contract",
+  "description": "Design contract only. Ranges, foreign keys, authorization, leases and deletion propagation also require runtime validation.",
+  "type": "array",
+  "items": {
+    "$ref": "#/$defs/record"
+  },
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "segment_id",
+        "source_sha256",
+        "start_ms",
+        "end_ms"
+      ],
+      "properties": {
+        "segment_id": {
+          "$ref": "#/$defs/id"
+        },
+        "source_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "transcript_revision": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "start_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "quote": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "place": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "source",
+        "certainty",
+        "observed_at"
+      ],
+      "properties": {
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "enum": [
+            "user_annotation",
+            "authorized_location_service",
+            "model_inference",
+            "unknown"
+          ]
+        },
+        "certainty": {
+          "enum": [
+            "user_confirmed",
+            "observed",
+            "inferred",
+            "unknown"
+          ]
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "accuracy_meters": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "uniqueItems": true
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "unknown"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "label": {
+                "type": "null"
+              },
+              "certainty": {
+                "const": "unknown"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "segment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "session_id",
+        "source",
+        "started_at",
+        "ended_at",
+        "captured_time_zone",
+        "duration_ms",
+        "monotonic_anchor_ns",
+        "sample_rate_hz",
+        "channels",
+        "codec",
+        "sha256",
+        "state",
+        "place",
+        "context_event_ids",
+        "access"
+      ],
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/id"
+        },
+        "source": {
+          "enum": [
+            "system_audio",
+            "microphone"
+          ]
+        },
+        "started_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "ended_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "captured_time_zone": {
+          "type": "string",
+          "minLength": 1
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "monotonic_anchor_ns": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "clock_domain_id": {
+          "$ref": "#/$defs/id"
+        },
+        "sample_rate_hz": {
+          "type": "integer",
+          "minimum": 8000
+        },
+        "channels": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "codec": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "state": {
+          "enum": [
+            "sealed",
+            "incomplete",
+            "deleted"
+          ]
+        },
+        "place": {
+          "$ref": "#/$defs/place"
+        },
+        "context_event_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "uniqueItems": true
+        },
+        "access": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "capture_grant_id",
+            "cloud_audio_allowed",
+            "host_text_allowed"
+          ],
+          "properties": {
+            "capture_grant_id": {
+              "$ref": "#/$defs/id"
+            },
+            "cloud_audio_allowed": {
+              "type": "boolean"
+            },
+            "host_text_allowed": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "transcript": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "segment_id",
+        "source_sha256",
+        "revision",
+        "status",
+        "engine",
+        "utterances"
+      ],
+      "properties": {
+        "segment_id": {
+          "$ref": "#/$defs/id"
+        },
+        "source_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "succeeded",
+            "no_speech",
+            "failed",
+            "partially_transcribed"
+          ]
+        },
+        "engine": {
+          "type": "string",
+          "minLength": 1
+        },
+        "utterances": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "speaker_local_id",
+              "text",
+              "start_ms",
+              "end_ms"
+            ],
+            "properties": {
+              "speaker_local_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "text": {
+                "type": "string"
+              },
+              "start_ms": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end_ms": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "language": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "unclear": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_type",
+        "text",
+        "epistemic_status",
+        "evidence",
+        "valid_from",
+        "valid_until",
+        "supersedes",
+        "extractor_revision"
+      ],
+      "properties": {
+        "claim_type": {
+          "enum": [
+            "topic",
+            "decision",
+            "commitment",
+            "task_candidate",
+            "entity_relation",
+            "hypothesis"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "epistemic_status": {
+          "enum": [
+            "observed_statement",
+            "user_confirmed",
+            "model_inference",
+            "disputed",
+            "retracted"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "valid_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "valid_until": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "supersedes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "uniqueItems": true
+        },
+        "extractor_revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "owner_entity_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "due_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action_state": {
+          "enum": [
+            "proposed",
+            "committed",
+            "blocked",
+            "cancelled",
+            "completed",
+            "unknown"
+          ]
+        },
+        "execution_receipt_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "action_state"
+            ],
+            "properties": {
+              "action_state": {
+                "const": "completed"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "execution_receipt_ids"
+            ],
+            "properties": {
+              "execution_receipt_ids": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "started_at",
+        "ended_at",
+        "source",
+        "reason"
+      ],
+      "properties": {
+        "started_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "ended_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "source": {
+          "enum": [
+            "system_audio",
+            "microphone",
+            "all"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "user_paused",
+            "permission_denied",
+            "sleep",
+            "device_disconnected",
+            "disk_full",
+            "crash",
+            "policy_excluded",
+            "unknown"
+          ]
+        }
+      }
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "id",
+        "kind",
+        "recorded_at",
+        "payload"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "0.1-draft"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "enum": [
+            "audio_segment",
+            "transcript_revision",
+            "memory_claim",
+            "coverage_gap"
+          ]
+        },
+        "recorded_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "payload": {
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "audio_segment"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/segment"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "transcript_revision"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/transcript"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "memory_claim"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/claim"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "coverage_gap"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/gap"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

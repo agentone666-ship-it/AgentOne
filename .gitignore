@@ -37,7 +37,13 @@ Diary/
 Evidence/
 Memory/
 Skills/
+!plugins/agentone-memory/skills/
+!plugins/agentone-memory/skills/**
 Model Invocations/
+Audio/
+memory.sqlite
+memory.sqlite-*
+capture.lock
 *.agentone-private.json
 
 # Editor state

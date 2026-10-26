@@ -1,0 +1,47 @@
+{
+  "kind": "production_feature_category_smoke_not_audio_accuracy",
+  "policy": "0.2.8",
+  "model": "convaiinnovations/laya/multilingual",
+  "revision": "7b928d828b7b0e022f929d9bd2e44165aa270148",
+  "runtime": "laya==0.4.12",
+  "correct": 4,
+  "total": 4,
+  "rows": [
+    {
+      "case": "sustained",
+      "expected": "record",
+      "id": "sustained",
+      "choice": "record",
+      "confidence": 0.8885,
+      "entropy_confidence": 0.4954,
+      "latency_ms": 83.4
+    },
+    {
+      "case": "quiet",
+      "expected": "wait",
+      "id": "quiet",
+      "choice": "wait",
+      "confidence": 0.8583,
+      "entropy_confidence": 0.4114,
+      "latency_ms": 30.2
+    },
+    {
+      "case": "unknown",
+      "expected": "wait",
+      "id": "unknown",
+      "choice": "wait",
+      "confidence": 0.7996,
+      "entropy_confidence": 0.2773,
+      "latency_ms": 26.6
+    },
+    {
+      "case": "transient",
+      "expected": "wait",
+      "id": "transient",
+      "choice": "wait",
+      "confidence": 0.8549,
+      "entropy_confidence": 0.4027,
+      "latency_ms": 26.1
+    }
+  ]
+}

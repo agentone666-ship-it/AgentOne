@@ -1,0 +1,9 @@
+{
+  "name": "agentone-memory",
+  "version": "0.2.9",
+  "description": "Recall local audio and computer-event evidence and maintain sourced long-term memory.",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "requires_local_executor": true,
+  "interface": {"displayName": "AgentOne Memory", "shortDescription": "找回录音与电脑事件，带着来源继续做事", "developerName": "AgentOne", "category": "Productivity", "capabilities": ["Read", "Write"]}
+}

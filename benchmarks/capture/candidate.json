@@ -1,0 +1,144 @@
+{
+  "kind": "synthetic_descriptive_state_not_audio_accuracy",
+  "model": "convaiinnovations/laya/multilingual",
+  "revision": "7b928d828b7b0e022f929d9bd2e44165aa270148",
+  "runtime": "laya==0.4.12",
+  "holdout": false,
+  "controlled_correct": 12,
+  "correct": 10,
+  "total": 12,
+  "rows": [
+    {
+      "controlled": "record",
+      "case": "active_both",
+      "current": "正在保存混合录音",
+      "expected": "record",
+      "id": "active_both",
+      "choice": "record",
+      "confidence": 0.5855,
+      "entropy_confidence": 0.0212,
+      "latency_ms": 699.6
+    },
+    {
+      "controlled": "record",
+      "case": "active_mic",
+      "current": "正在保存混合录音",
+      "expected": "record",
+      "id": "active_mic",
+      "choice": "record",
+      "confidence": 0.6038,
+      "entropy_confidence": 0.0313,
+      "latency_ms": 200.8
+    },
+    {
+      "controlled": "record",
+      "case": "active_system",
+      "current": "正在保存混合录音",
+      "expected": "record",
+      "id": "active_system",
+      "choice": "wait",
+      "confidence": 0.568,
+      "entropy_confidence": 0.0134,
+      "latency_ms": 145.1
+    },
+    {
+      "controlled": "wait",
+      "case": "quiet_20",
+      "current": "正在保存混合录音",
+      "expected": "wait",
+      "id": "quiet_20",
+      "choice": "wait",
+      "confidence": 0.7623,
+      "entropy_confidence": 0.2088,
+      "latency_ms": 279.0
+    },
+    {
+      "controlled": "wait",
+      "case": "quiet_60",
+      "current": "正在保存混合录音",
+      "expected": "wait",
+      "id": "quiet_60",
+      "choice": "wait",
+      "confidence": 0.7739,
+      "entropy_confidence": 0.2288,
+      "latency_ms": 133.3
+    },
+    {
+      "controlled": "record",
+      "case": "unknown",
+      "current": "正在保存混合录音",
+      "expected": "record",
+      "id": "unknown",
+      "choice": "record",
+      "confidence": 0.8257,
+      "entropy_confidence": 0.3326,
+      "latency_ms": 57.9
+    },
+    {
+      "controlled": "record",
+      "case": "active_both",
+      "current": "听候新声音，内存有 10 秒预录",
+      "expected": "record",
+      "id": "active_both",
+      "choice": "record",
+      "confidence": 0.5855,
+      "entropy_confidence": 0.0212,
+      "latency_ms": 140.5
+    },
+    {
+      "controlled": "record",
+      "case": "active_mic",
+      "current": "听候新声音，内存有 10 秒预录",
+      "expected": "record",
+      "id": "active_mic",
+      "choice": "record",
+      "confidence": 0.6038,
+      "entropy_confidence": 0.0313,
+      "latency_ms": 78.2
+    },
+    {
+      "controlled": "record",
+      "case": "active_system",
+      "current": "听候新声音，内存有 10 秒预录",
+      "expected": "record",
+      "id": "active_system",
+      "choice": "wait",
+      "confidence": 0.568,
+      "entropy_confidence": 0.0134,
+      "latency_ms": 69.5
+    },
+    {
+      "controlled": "wait",
+      "case": "quiet_20",
+      "current": "听候新声音，内存有 10 秒预录",
+      "expected": "wait",
+      "id": "quiet_20",
+      "choice": "wait",
+      "confidence": 0.7623,
+      "entropy_confidence": 0.2088,
+      "latency_ms": 72.3
+    },
+    {
+      "controlled": "wait",
+      "case": "quiet_60",
+      "current": "听候新声音，内存有 10 秒预录",
+      "expected": "wait",
+      "id": "quiet_60",
+      "choice": "wait",
+      "confidence": 0.7739,
+      "entropy_confidence": 0.2288,
+      "latency_ms": 77.6
+    },
+    {
+      "controlled": "record",
+      "case": "unknown",
+      "current": "听候新声音，内存有 10 秒预录",
+      "expected": "record",
+      "id": "unknown",
+      "choice": "record",
+      "confidence": 0.8257,
+      "entropy_confidence": 0.3326,
+      "latency_ms": 67.1
+    }
+  ]
+}

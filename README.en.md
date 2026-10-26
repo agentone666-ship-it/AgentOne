@@ -45,7 +45,7 @@ cd Thenvia
 swift run AgentOne
 ```
 
-1. Grant system-audio and microphone permissions, then check input status in the notch panel. Automatic capture starts in a listening state; sustained audio and stable decisions gate recording.
+1. Grant system-audio and microphone permissions, then check input status in the notch panel. Version 0.2.9 preserves mixed audio continuously by default; Laya annotates and splits it without gating preservation. Smart triggering remains optional and may miss conversations.
 2. Enable on-device transcription in Settings and record a short permitted test statement.
 3. Wait for the segment to seal and transcription to finish. Search a phrase in Recall, play the source, and confirm it matches.
 

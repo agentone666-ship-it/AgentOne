@@ -1,0 +1,107 @@
+{
+  "benchmark": "agentone-recall-v1",
+  "mode": "candidate",
+  "scope": "Synthetic transcript retrieval + evidence/handoff contracts through a real MCP subprocess. Not ASR, speech quality, LLM reasoning or real-world execution.",
+  "recordings": 258,
+  "cases": 4,
+  "metrics": {
+    "positive_top1": "2/4",
+    "positive_recall_at_5": 0.5,
+    "status_accuracy": "2/4",
+    "scenario_pass": "2/4",
+    "event_link": "0/1",
+    "action_contract": "n/a"
+  },
+  "dev": {
+    "positive_top1": "n/a",
+    "positive_recall_at_5": 0,
+    "status_accuracy": "n/a",
+    "scenario_pass": "n/a",
+    "event_link": "n/a",
+    "action_contract": "n/a"
+  },
+  "transfer": {
+    "positive_top1": "n/a",
+    "positive_recall_at_5": 0,
+    "status_accuracy": "n/a",
+    "scenario_pass": "n/a",
+    "event_link": "n/a",
+    "action_contract": "n/a"
+  },
+  "latency_p95_ms": 40.93,
+  "rows": [
+    {
+      "id": "colloquial-morning",
+      "split": "challenge",
+      "expected_status": "found",
+      "status": "found",
+      "status_pass": true,
+      "expected_audio": true,
+      "needs_event": false,
+      "needs_action": false,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 40.93,
+      "sessions": [
+        "design"
+      ]
+    },
+    {
+      "id": "semantic-offline",
+      "split": "challenge",
+      "expected_status": "found",
+      "status": "not_found",
+      "status_pass": false,
+      "expected_audio": true,
+      "needs_event": false,
+      "needs_action": false,
+      "top1": false,
+      "recall_at_5": 0,
+      "event_link": true,
+      "action_contract": true,
+      "pass": false,
+      "latency_ms": 12.21,
+      "sessions": []
+    },
+    {
+      "id": "omitted-day-ambiguous",
+      "split": "challenge",
+      "expected_status": "needs_clarification",
+      "status": "needs_clarification",
+      "status_pass": true,
+      "expected_audio": true,
+      "needs_event": false,
+      "needs_action": false,
+      "top1": true,
+      "recall_at_5": 1,
+      "event_link": true,
+      "action_contract": true,
+      "pass": true,
+      "latency_ms": 12.08,
+      "sessions": [
+        "ambiguous-b",
+        "ambiguous-a"
+      ]
+    },
+    {
+      "id": "context-with-paraphrase",
+      "split": "challenge",
+      "expected_status": "found",
+      "status": "not_found",
+      "status_pass": false,
+      "expected_audio": true,
+      "needs_event": true,
+      "needs_action": false,
+      "top1": false,
+      "recall_at_5": 0,
+      "event_link": false,
+      "action_contract": true,
+      "pass": false,
+      "latency_ms": 9.18,
+      "sessions": []
+    }
+  ]
+}

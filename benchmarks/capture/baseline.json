@@ -1,0 +1,118 @@
+{
+  "kind": "synthetic_descriptive_state_not_audio_accuracy",
+  "model": "convaiinnovations/laya/multilingual",
+  "revision": "7b928d828b7b0e022f929d9bd2e44165aa270148",
+  "runtime": "laya==0.4.12",
+  "correct": 1,
+  "total": 12,
+  "rows": [
+    {
+      "case": "active_both",
+      "current": "正在保存混合录音",
+      "expected": "record",
+      "id": "active_both",
+      "choice": "wait",
+      "confidence": 0.0155,
+      "latency_ms": 570.2
+    },
+    {
+      "case": "active_mic",
+      "current": "正在保存混合录音",
+      "expected": "record",
+      "id": "active_mic",
+      "choice": "wait",
+      "confidence": 0.0254,
+      "latency_ms": 100.8
+    },
+    {
+      "case": "active_system",
+      "current": "正在保存混合录音",
+      "expected": "record",
+      "id": "active_system",
+      "choice": "record",
+      "confidence": 0.1454,
+      "latency_ms": 80.1
+    },
+    {
+      "case": "quiet_20",
+      "current": "正在保存混合录音",
+      "expected": "wait",
+      "id": "quiet_20",
+      "choice": "record",
+      "confidence": 0.335,
+      "latency_ms": 104.6
+    },
+    {
+      "case": "quiet_60",
+      "current": "正在保存混合录音",
+      "expected": "wait",
+      "id": "quiet_60",
+      "choice": "record",
+      "confidence": 0.3598,
+      "latency_ms": 113.7
+    },
+    {
+      "case": "unknown",
+      "current": "正在保存混合录音",
+      "expected": "record",
+      "id": "unknown",
+      "choice": "wait",
+      "confidence": 0.0614,
+      "latency_ms": 103.3
+    },
+    {
+      "case": "active_both",
+      "current": "听候新声音，内存有 10 秒预录",
+      "expected": "record",
+      "id": "active_both",
+      "choice": "wait",
+      "confidence": 0.2018,
+      "latency_ms": 110.5
+    },
+    {
+      "case": "active_mic",
+      "current": "听候新声音，内存有 10 秒预录",
+      "expected": "record",
+      "id": "active_mic",
+      "choice": "wait",
+      "confidence": 0.3612,
+      "latency_ms": 97.3
+    },
+    {
+      "case": "active_system",
+      "current": "听候新声音，内存有 10 秒预录",
+      "expected": "record",
+      "id": "active_system",
+      "choice": "wait",
+      "confidence": 0.121,
+      "latency_ms": 112.9
+    },
+    {
+      "case": "quiet_20",
+      "current": "听候新声音，内存有 10 秒预录",
+      "expected": "wait",
+      "id": "quiet_20",
+      "choice": "record",
+      "confidence": 0.0136,
+      "latency_ms": 114.2
+    },
+    {
+      "case": "quiet_60",
+      "current": "听候新声音，内存有 10 秒预录",
+      "expected": "wait",
+      "id": "quiet_60",
+      "choice": "record",
+      "confidence": 0.0092,
+      "latency_ms": 97.3
+    },
+    {
+      "case": "unknown",
+      "current": "听候新声音，内存有 10 秒预录",
+      "expected": "record",
+      "id": "unknown",
+      "choice": "wait",
+      "confidence": 0.3187,
+      "latency_ms": 121.7
+    }
+  ]
+}
