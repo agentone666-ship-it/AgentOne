@@ -23,6 +23,10 @@ Local npm ci and shared Runtime/MCP checks passed: 58 Runtime tests and the cros
 
 HTTP tests use local mocks and synthetic inputs. They do not claim live provider/account validation. The default capture app still excludes the independent legacy Agent runtime.
 
+## PACKAGING BOUNDARY
+
+The first remote run on the pre-#2 base passed Node and macOS Swift/integration gates but failed the old compiled Deno sidecar Kimi smoke test with a runtime-compatibility error before HTTP dispatch (run 40267384562). After #2 merged, this branch was synchronized to main. The current product deliberately packages CaptureKit and the generic MCP plugin only; its package test explicitly excludes the legacy runtime. This PR changes no workflow or packaging gate relative to current main. The old compiled Deno sidecar is not validated or shipped by the current product. Legacy Node-based protocol/integration regression checks remain required.
+
 ## HANDOFF
 
 No personal recordings, location, credentials, app installation, release publication or deployment are part of this change. No CI gate is weakened.
