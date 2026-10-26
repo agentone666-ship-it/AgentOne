@@ -1,4 +1,4 @@
-# Security Policy
+# Thenvia Security Policy
 
 ## 支持范围
 

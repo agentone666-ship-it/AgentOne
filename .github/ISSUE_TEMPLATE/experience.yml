@@ -1,0 +1,55 @@
+name: 使用体验 / Share an experience
+description: 告诉我们一次真实找回是否帮上忙；请只提供脱敏信息。
+title: "[Experience]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请描述流程，不上传真实录音、转写、坐标、联系人、公司资料或凭据。尚未完成的步骤也值得反馈。
+        Describe the workflow using synthetic or redacted examples. Do not upload private recordings or work data.
+  - type: input
+    id: environment
+    attributes:
+      label: 系统与版本 / Environment
+      description: macOS、App 版本/commit，以及使用的 Agent 宿主与版本（如有）。
+    validations:
+      required: true
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 想找回什么 / Your scenario
+      description: 用替代姓名和主题描述；当时只记得哪些线索？
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: 进展到哪一步 / Result
+      options:
+        - 尚未安装成功 / Could not install
+        - 已安装，未开始记录 / Installed, capture not ready
+        - 已记录，尚未找回 / Captured, not retrieved
+        - 已找回并核对来源 / Retrieved and verified
+        - 已整理事项草稿 / Created a handoff draft
+        - 已执行并核查产物 / Verified an actual outcome
+    validations:
+      required: true
+  - type: textarea
+    id: friction
+    attributes:
+      label: 哪一步费劲或有帮助 / What helped or got in the way
+  - type: dropdown
+    id: discovery
+    attributes:
+      label: 最初从哪里知道产品 / First heard about it
+      options:
+        - GitHub
+        - X
+        - 小红书 / Xiaohongshu
+        - 朋友或社群 / Friend or community
+        - 其他或不清楚 / Other or unknown
+  - type: input
+    id: entry
+    attributes:
+      label: 这次从哪里来到仓库 / Your entry path this time
+      description: 可填内容编号或平台名称；不需要粘贴含私人参数的链接。

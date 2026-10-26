@@ -1,6 +1,10 @@
-# Contributing to AgentOne
+# Contributing to Thenvia
 
-AgentOne 仍处于快速迭代期。提交变更时，请把“用户能否理解和控制自己的 Context”放在功能数量之前。
+Thenvia（留境，原 AgentOne）仍处于快速迭代期。提交变更时，请把“用户能否理解和控制自己的 Context”放在功能数量之前。
+
+## 选择代码分支
+
+当前 `main` 仍为迁移前实现，新版 Capture App 在 `codex/audio-memory-mvp`，见 [PR #2](https://github.com/agentone666-ship-it/Thenvia/pull/2)。请按变更目标选择基线，避免在文档更新中夹带尚未合入的功能。品牌名为 Thenvia，现有 Swift target、命令、MCP 与数据标识保留 AgentOne 兼容。
 
 ## 开发流程
 

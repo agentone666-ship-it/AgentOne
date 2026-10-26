@@ -1,5 +1,5 @@
-name: 功能建议
-description: 描述用户问题、预期行为和验收标准
+name: 场景与功能建议 / Suggest a scenario
+description: 描述想找回的现场、下一步需求和预期结果。请使用脱敏信息。
 body:
   - type: textarea
     id: problem

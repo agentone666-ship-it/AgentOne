@@ -6,7 +6,7 @@
 - 起始 GitHub `origin/main`：`e2461fe`，比本地少一笔 Memory 功能提交（30 个文件）。
 - CI/CD 改动在 `codex/github-ci-cd`；本地全量验证通过。
 - 用户已确认以当前本地项目为准；已有 Memory 提交和独立 CI/CD 提交均已推送主题分支。
-- [PR #1](https://github.com/agentone666-ship-it/AgentOne/pull/1) 已创建；首轮云端 CI 全绿，main 分支保护已应用并回读。
+- [PR #1](https://github.com/agentone666-ship-it/Thenvia/pull/1) 已创建；首轮云端 CI 全绿，main 分支保护已应用并回读。
 - PR 保持待合并；main 合并后获得新版工作流、模板和 Dependabot 配置。最新 Checks 以 PR 页面为准。
 - 尚未公开发布任何安装包。
 
@@ -21,7 +21,7 @@
 ## CHANGES
 
 - 修复历史 CI：`npm test` 之前没有生产构建，干净 runner 缺少 `dist/index.js`。
-  原失败证据：[run 33531007655](https://github.com/agentone666-ship-it/AgentOne/actions/runs/33531007655)。
+  原失败证据：[run 33531007655](https://github.com/agentone666-ship-it/Thenvia/actions/runs/33531007655)。
 - 新增共享 `scripts/ci.sh`，覆盖 Runtime、Memory MCP、Swift、集成和安装包。
 - CI 增加 Node 支持下限/24 矩阵、actionlint、生产依赖审计、超时、并发取消、日志与 ZIP artifact。
 - Actions 固定完整 commit SHA，checkout 不持久化凭证；仅草稿发布任务有写权限。
@@ -44,7 +44,7 @@
 
 ### GitHub Runner 验证
 
-[CI run 40177217404](https://github.com/agentone666-ship-it/AgentOne/actions/runs/40177217404)，PR head `24be172`：
+[CI run 40177217404](https://github.com/agentone666-ship-it/Thenvia/actions/runs/40177217404)，PR head `24be172`：
 
 - Workflow lint、Runtime Node 22.19.0、Runtime Node 24、macOS tests and package、all checks passed 全部 success。
 - macOS 的 Swift 测试、五个 Harness、生产打包与最终 ZIP 黑盒 E2E 全部通过。
