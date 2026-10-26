@@ -36,3 +36,7 @@
 ## HANDOFF
 
 原始 Laya 零样本泛化较弱。保护层是必要边界；如果之后要按“交谈是否重要”选择录音，需要另行提供实时 ASR/声音语义模型输入并采集授权场景评估，不能从 RMS 推断人物或会议内容。
+
+## INTEGRATION
+
+远端 #1 已合并且 #5 更新了 README/界面演示图，PR #2 已改为基于 main。本次同步 main 时保留其 README 图示与产品说明，并补入 0.2.6；CI、打包和 Release 采用新版 VERSION/Capture App/MCP 门禁，历史回归继续保留。

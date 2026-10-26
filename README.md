@@ -2,114 +2,142 @@
 
 # AgentOne
 
-[![CI](https://github.com/agentone666-ship-it/AgentOne/actions/workflows/ci.yml/badge.svg)](https://github.com/agentone666-ship-it/AgentOne/actions/workflows/ci.yml)
+**把经历留下，把行动交给你的 Agent。**
 
-你的 Agent 的个人经历记忆：灵动岛、混合录音、事件线索与通用 MCP。
+macOS 灵动岛 · 自动混合录音 · 事件记录 · 可追溯的个人记忆 · 通用 MCP
+
+[![CI](https://github.com/agentone666-ship-it/AgentOne/actions/workflows/ci.yml/badge.svg)](https://github.com/agentone666-ship-it/AgentOne/actions/workflows/ci.yml)
 
 </div>
 
-AgentOne v0.2 把电脑上的系统声音与麦克风混合为一条录音保存在本机，用时间戳关联现场，提供转写、标签、证据与长期记忆的接口。推理和行动交给用户选择的 Agent；默认 App 不再启动或携带 Pi Agent Runtime，也没有独立聊天、模型账号或任务规划器。
+> “今天早上在工位和同事聊的那个需求，帮我找出录音，整理成待办，再接着做。”
 
-![原生灵动岛，演示态，不采集声音](docs/images/agentone-island-vnext.png)
+AgentOne 为这类需求保留现场：电脑声音与麦克风混成一条录音，并关联时间、手动标注的地点和电脑活动。你连接的 Agent 通过 MCP 查找候选、核对原话与上下文，再提取长期记忆或执行你授权的事项。
 
-> 当前是可运行的开发预览。合成音频、MCP 跨进程、数据持久化和实际 ZIP 已验证；短时双路采集、本机转写后查询回读和旧事件导入已有设备烟测；ASR 准确率、全天连续性、中文多人对话和真实宿主执行仍需验收。截图来自原生 App 的演示模式，没有真实用户录音。
+**现在的界面是屏幕顶部的灵动岛。** 鼠标移到刘海区域展开，移开收起；也可以固定展开。记录、回忆和设置都在岛内完成。
 
-## 核心链路
+> **开发预览**：新版应用代码与构建入口位于 [`codex/audio-memory-mvp`](https://github.com/agentone666-ship-it/AgentOne/tree/codex/audio-memory-mvp)，见 [PR #2](https://github.com/agentone666-ship-it/AgentOne/pull/2)。新版尚未作为正式版本发行。
 
-```text
-系统声音 ──┐
-           ├── 时间对齐与混音 ── 一条分段录音 + SQLite + 时间/地点/事件线索
-麦克风 ───┘                │
-                          本机 ASR（显式启用、仅 on-device）
-                                      │
-                             MCP 待分析队列
-                                      │
-                         用户的 Agent：标签、事实、待办候选
-                                      │
-                        带证据的长期记忆 + 更新/替代关系
+## 现在的界面
+
+<p align="center">
+  <img src="docs/images/island-record.png" alt="灵动岛记录页：系统声音与麦克风合并为一条录音，支持地点标注和暂停" width="48%" />
+  <img src="docs/images/island-recall.png" alt="灵动岛回忆页：搜索声音、查看转写和标签、回放原音" width="48%" />
+</p>
+
+<p align="center">
+  <img src="docs/images/island-events.png" alt="灵动岛事件页：统一查看旧 Diary 与新的现场活动线索" width="48%" />
+  <img src="docs/images/island-settings.png" alt="灵动岛设置页：自动记录、登录启动、锁屏暂停、本机转写与原音访问" width="48%" />
+</p>
+
+以上图片由当前原生 SwiftUI 界面离屏渲染，使用明确标注的演示数据，不含真实录音、转写或电脑活动。演示中的地点与对话不代表实际记录。示例图为 0.2.5 布局；0.2.6 新增实测音量波形与 Laya 听候状态。
+
+## 它会保留什么
+
+| 信息 | 如何帮助回忆 |
+| --- | --- |
+| 一条混合录音 | 系统音与麦克风按同一时间轴对齐，分段保存，回放和转写共用一条录音 |
+| 时间与现场 | 保留开始时间、时长、输入状态、暂停或断流信息；地点由用户手动标注 |
+| 电脑事件 | 关联应用、窗口、可读取的页面与交互线索；旧 Diary 也可检索，细节取决于系统授权 |
+| 转写与标签 | 可选本机语音转写；连接的 Agent 领取分析任务，写回主题、事实与待办候选 |
+| 长期记忆 | 保存来源引用、有效时间、得知时间与更新替代关系，支持日后重新核查 |
+
+原音和现场线索保存在本机。附近打开的网页只是线索，不能当成谈话原话；提到一个人，也不能直接认定他就是录音中的说话人。
+
+## 从模糊回忆到下一步
+
+```mermaid
+flowchart LR
+    A["系统声音 + 麦克风"] --> B["一条分段录音"]
+    C["时间 · 地点 · 电脑事件"] --> D["关联现场"]
+    B --> D
+    D --> E["MCP 检索候选"]
+    E --> F["核对原话与上下文"]
+    F --> G["你的 Agent：记忆 · 待办 · 行动"]
 ```
 
-- **原音优先保留**：默认约 60 秒分段，静音不因重要性评分被丢弃；断流、休眠、暂停与异常尾段有状态记录。
-- **一条录音**：系统音与麦克风按主机时钟对齐、重采样和混音，只生成一条分段录音和一份转写；系统左右声道各混入麦克风，保留立体声信息。旧分轨历史继续可查。
-- **静默处理**：固定的本机 ASR worker 处理转写；宿主 Agent 通过带 lease 的 MCP 队列提取标签。宿主离线时排队，不伪装已经分析。
-- **长期记忆可回溯**：宿主可将多段证据巩固为项目摘要、决定、实体线索或未解决事项；保存有效时间、得知时间、引用与替代关系。
-- **近期和旧记录一起可查**：关键词变体、日期、来源、地点提示与跨月查询；缺少时间时不只搜最近数据。
-- **可控的本机采集**：开始/暂停、可选锁屏暂停、休眠暂停、可选登录续录、手动地点标注、原音回放与最近片段删除。
+1. **自动留下现场**：首次完成系统音和麦克风授权后，自动记录；手动暂停会保留，不会因重启自行取消。
+2. **按线索找回来**：Agent 综合主题、时间、地点和事件查找录音；有多个候选时继续核查或向你确认。
+3. **核对后再落实**：通过来源与上下文区分提议、承诺和已取消事项，再由宿主 Agent 执行当前授权范围内的任务。
 
-长期检索当前采用词面匹配和宿主查询扩展，尚未实现 embedding、向量重排、全自动人物识别或跨片段对话合并。原话引用检查不能替代 ASR 与模型质量评估。
+AgentOne 提供采集、检索和记忆接口。持续分析与行动需要你选择的 MCP 宿主运行；接入插件本身不会让已关闭的 Agent 自动工作。
 
-## 快速开始
+## 运行新版
 
-环境：macOS 15+、Swift 6.1+；MCP 需 Node.js 22.19+。新默认 App 的打包不需要 Deno 或 Pi 依赖。
+需要 macOS 15+、Swift 6.1+；MCP 服务需要 Node.js 22.19+。
 
 ```bash
+git clone https://github.com/agentone666-ship-it/AgentOne.git
+cd AgentOne
+git switch codex/audio-memory-mvp
 swift run AgentOne
-# 分发 ZIP
+
+# 构建安装包
 ./scripts/build_app.sh release
 ```
 
-产物为 `build/AgentOne.app.zip`。iCloud 工作区中请先解压到普通本地目录，再启动 App。
-0.2.6 默认自动混合记录：首次请求一次系统音与麦克风权限，授权后自动开始，登录启动默认开启（以系统实际批准为准）；手动暂停会持久保留。鼠标移到刘海区域约 0.16 秒自动展开，移开后约 0.6 秒收起；可点击图钉固定。无刘海的显示器使用顶部胶囊。
+安装包生成在 `build/AgentOne.app.zip`。在 iCloud 工作区构建时，先解压到普通本地目录，再启动。
 
-不需要每天点击开始；Laya 在本机根据声音活动状态决定保存或听候。只有持续安静、双路输入正常且模型连续两次高置信建议听候，才暂停写入；保留 10 秒内存预录，恢复时补回开头。模型缺失、超时或不确定时继续保存。灵动岛音频标跟随实际混音 RMS 音量变化。系统音由 ScreenCaptureKit 采集，麦克风由独立 AVAudioEngine 输入，共用主机时间轴。遇到权限拒绝会显示错误，可完成系统授权后点“恢复自动记录”。本机转写和原音访问仍在「设置」页单独开启。「回忆」页可搜索和回放已有片段。
-勾选登录续录后，可在已有授权和用户仍希望录制的前提下恢复；手动暂停不会因重启被悄悄取消。
+- 鼠标悬停刘海约 0.16 秒展开，离开约 0.6 秒收起；图钉可保持展开。无刘海显示器使用顶部胶囊。
+- 「记录」页查看输入状态、标注地点、暂停或恢复记录；录音时图标跟随真实混音音量，未录音时静止。
+- 「回忆」页切换声音与事件，搜索转写、主题或地点，并回放原音。
+- 「设置」页管理自动记录、登录启动、锁屏暂停、本机转写和 Agent 原音访问。登录启动以系统实际批准为准。
 
-本机 Laya 首次配置（需要 `uv`，下载 Python 依赖与约 650 MB 多语言权重）：
+## 本机录音决策
+
+0.2.6 使用 Laya 多语言文本分类器，根据声音活动描述建议保存或听候。只有持续静音、双路输入正常且模型连续两次达到门限，才暂停写文件；听候时保留最近 10 秒混音 PCM 到内存，恢复时补回开头。模型不可用或不确定时继续保存，手动暂停优先。较早的静音不保存，缺口明确记录；模型不读取原音或转写，也不判断人物和谈话内容。
+
+首次配置需要 `uv`，将 Python 依赖与约 650 MB 固定权重安装到本机 Application Support。正常启动只使用离线缓存，不运行独立 Agent runtime。
 
 ```bash
 bash scripts/setup_laya.sh
-# 固定描述性状态 benchmark；不测真实语音准确率
 python3 benchmarks/capture/run.py
+python3 benchmarks/capture/run.py --holdout
 ```
 
-App 只启动本机结构化分类进程，不运行独立 Agent。模型输入为声音活动描述，不读取原音或转写；静音门限不是语音识别。模型/预录/验证边界见 [0.2.6 记录](docs/vnext/LAYA_WAVEFORM_026.md)。
+模型原始判断在不同措辞保留集仅 4/8，不能单独控制录音。门限与固定用例见 [Capture Benchmark](benchmarks/capture/README.md)，实现和真机证据见 [0.2.6 记录](docs/vnext/LAYA_WAVEFORM_026.md)。
 
-## 接入任意 MCP 宿主
+## 连接你的 Agent
+
+在新版分支中生成通用 MCP 配置：
 
 ```bash
 node scripts/print_mcp_config.mjs
-# 指向安装包中的 MCP 服务
+# 或使用已安装应用中的服务（改为你的实际路径）
 node scripts/print_mcp_config.mjs '/Applications/AgentOne.app'
 ```
 
-把输出按宿主的 MCP 配置格式接入。服务只提供资料、分析任务与记忆写回，不提供录音启动、shell、发消息或浏览器执行工具。
-工具、后台调度和原音访问见 [MCP 说明](plugins/agentone-memory/README.md)。
-宿主是否持续运行和如何定时分析，由宿主自己的能力决定；安装 MCP 本身不能让关闭的宿主自动推理。
+把输出加入宿主的 MCP 配置。通过 `recall_context` 查候选，`get_context_bundle` 取原话与上下文，`get_context_event` 核查事件来源。`recall_and_act` prompt 引导宿主完成查找、确认与行动交接。
 
-默认存储在 `~/Documents/AgentOne Home/Memory`，或现有 Agent Home 的 `Memory` 子目录。
-通过 `AGENTONE_MEMORY_HOME` 指定 Memory 根目录可用于测试和自定义部署。
-旧 Diary 和 [personal-context-memory](plugins/personal-context-memory/README.md) 保留。新版将可见非敏感活动投影到统一事件索引，不改写或删除原文件；回忆页可切换声音/事件并查看原来源。
+默认数据目录为 `~/Documents/AgentOne Home/Memory`，也兼容现有 Agent Home 的 `Memory` 子目录；可用 `AGENTONE_MEMORY_HOME` 自定义。
 
-## 模糊回忆与 benchmark
+工具与后台分析队列见 [新版 MCP 说明](https://github.com/agentone666-ship-it/AgentOne/blob/codex/audio-memory-mvp/plugins/agentone-memory/README.md)。
 
-通过 `recall_context` 找候选，`get_context_bundle` 取原话和前后文，`get_context_event` 核查事件来源；`recall_and_act` prompt 把有来源的事项交给你的 Agent。附近网页不是录音原话，人名出现不证明说话人身份。
+## 验证与当前边界
 
-固定合成用例新接口通过 18/18，探索语言挑战仅 2/4；真实转写和宿主推理/执行尚未完成端到端验收。数据卡、较强基线对照和复现命令见 [Recall Benchmark](benchmarks/recall/README.md)。
-
-## 测试与交付
+新版分支可运行：
 
 ```bash
-# 包含保留的历史回归测试
-npm ci --prefix AgentOneLifeRuntime
-bash scripts/ci.sh all
-
-# 独立验证新的采集与插件
 swift test
 swift run AgentOneAudioHarness
 node --test plugins/agentone-memory/test.mjs
+node benchmarks/recall/run.mjs --check
+
+# 包括迁移期历史回归与安装包检查
+npm ci --prefix AgentOneLifeRuntime
+bash scripts/ci.sh all
 ```
 
-门禁包括实际 CMSampleBuffer → AAC 编码、分段、SQLite、MCP 子进程、引用/任务 lease/删除传播、长期记忆更新，以及最终 ZIP 的签名、资源与无 Pi Runtime 检查。合成转写与标签 fixture 只验证接口，不代表真实模型效果。
+CI 检查音频编码与持久化、MCP 子进程、证据校验、任务队列和安装包。模糊回忆固定合成场景通过 **18/18**，探索性语言挑战为 **2/4**；这些结果不代表真实语音识别、多人对话或宿主执行的准确率。详见 [Recall Benchmark](https://github.com/agentone666-ship-it/AgentOne/blob/codex/audio-memory-mvp/benchmarks/recall/README.md)。
 
-[CI/CD 指南](docs/CI_CD.md) · [本次实现状态与验收](docs/vnext/STATUS_CAPTURE_MEMORY.md) · [产品设计](docs/vnext/PRD_ISLAND_AUDIO_MEMORY.md) · [隐私](docs/PRIVACY.md)
+已有短时真机混音、本机转写、历史事件导入与原音校验；全天稳定性、真实对话检索效果和宿主完整执行仍需继续验收。目前检索采用词面匹配和宿主查询扩展，尚无向量检索、自动定位或可靠的说话人识别。
 
-## 开发边界
+## 隐私与开发
 
-- `Sources/AgentOneCaptureApp`：灵动岛、用户控制与本机生命周期。
-- `Sources/AgentOneCaptureKit`：输入混音、音频封口、SQLite、本机 ASR、被动事件与旧 Diary 投影。
-- `plugins/agentone-memory`：不绑定宿主的 MCP 与长期记忆数据层。
-- `Sources/AgentOneApp`、`AgentOneLifeRuntime`：v0.1 历史实现，仅保留迁移期回归；开发时可显式运行 `swift run AgentOneLegacy`，默认分发不包含它。
+不需要 AgentOne 云账号。原音访问需要单独开启；接入宿主后，宿主可能把读取的资料交给云模型。本机文件权限保护不等于应用级加密。使用前请阅读 [新版隐私说明](https://github.com/agentone666-ship-it/AgentOne/blob/codex/audio-memory-mvp/docs/PRIVACY.md)。
 
-没有 AgentOne 云账号。文件权限保护不是应用级加密；接入宿主后，宿主可能把资料交给云模型。请阅读隐私说明再开始日常录音。
+新版默认应用由 `AgentOneCaptureApp`、`AgentOneCaptureKit` 与 `plugins/agentone-memory` 组成。旧界面代码仅保留迁移回归，新版分发使用灵动岛与通用 MCP。
+
+[开发与 CI/CD](docs/CI_CD.md) · [新版实现状态](https://github.com/agentone666-ship-it/AgentOne/blob/codex/audio-memory-mvp/docs/vnext/STATUS_CAPTURE_MEMORY.md) · [贡献](CONTRIBUTING.md) · [安全](SECURITY.md)
 
 当前仓库尚未授予开源许可证；未经明确许可，请勿复制或再分发项目代码与素材。
