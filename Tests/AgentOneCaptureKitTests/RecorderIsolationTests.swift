@@ -45,6 +45,21 @@ import Darwin
 }
 
 struct RecorderWatermarkTests {
+    @Test func delayedDeviceShutdownSealsOnlyReceivedPCMAndRecordsTheMissingTail() throws {
+        let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer{try? FileManager.default.removeItem(at:root)}
+        let db=try MemoryDatabase(root:root),host=ProcessInfo.processInfo.systemUptime
+        let mixer=MixedAudioWriter(database:db,sessionID:"slow-shutdown",wallAnchor:Date(),hostAnchor:host)
+        let format=AVAudioFormat(standardFormatWithSampleRate:48000,channels:1)!
+        let block=AVAudioPCMBuffer(pcmFormat:format,frameCapacity:48000)!;block.frameLength=48000
+        block.floatChannelData![0].update(repeating:0.2,count:48000)
+        try mixer.append(block,source:"microphone",presentationSeconds:host)
+        try mixer.finish(throughHostSeconds:host+61)
+        let row=try #require(db.rows("SELECT * FROM segments WHERE state='sealed'").first)
+        #expect(abs(Double(row["ended_ms"]!)!-Double(row["started_ms"]!)!-1000)<2)
+        let gap=try #require(db.rows("SELECT * FROM coverage WHERE reason='inputs_stopped_before_close'").first)
+        #expect(abs(Double(gap["ended_ms"]!)!-Double(gap["started_ms"]!)!-60000)<2)
+    }
     @Test func fasterSystemInputCannotSealOverQueuedMicrophone() throws {
         let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer{try? FileManager.default.removeItem(at:root)}

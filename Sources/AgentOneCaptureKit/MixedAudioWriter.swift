@@ -185,9 +185,12 @@ public final class MixedAudioWriter: @unchecked Sendable {
     public func finish(throughHostSeconds cutoff:Double? = nil) throws {
         guard !closed else {return}
         if cursor != nil {
-            let end=max(latest,max(cursor ?? 0,cutoff.map {Int64(floor(($0-host)*Self.sampleRate))} ?? latest))
+            let end=max(latest,cursor ?? 0)
             try flush(throughHostSeconds:host+Double(end)/Self.sampleRate)
             for (source,start) in missingStarts {try gap(source:source,start:start,end:end)}
+            if let cutoff,cutoff>host+Double(end)/Self.sampleRate+0.01 {
+                try database.addGap(started:wall.addingTimeInterval(Double(end)/Self.sampleRate),ended:wall.addingTimeInterval(cutoff-host),source:"all",reason:"inputs_stopped_before_close")
+            }
         }
         if let gate {try gate.finish(now:host+Double(cursor ?? 0)/Self.sampleRate)} else {try writer.finish()};closed=true;blocks.removeAll();missingStarts.removeAll()
         try database.execute("INSERT INTO meta VALUES ('mixed_input_stats',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[mixingContext()])

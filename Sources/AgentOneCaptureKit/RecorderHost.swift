@@ -21,7 +21,7 @@ import Darwin
         guard fd>=0 else {throw CaptureFailure.message("无法锁定采集进程")}
         guard Darwin.lockf(fd,F_TLOCK,0)==0 else {Darwin.close(fd);return}
         defer {Darwin.close(fd)}
-        service.onFailure={ [weak self] in self?.failure=$0 }
+        service.onFailure={ [weak self] message in self?.failure=message;self?.log("capture_failure",detail:message) }
         let center=NSWorkspace.shared.notificationCenter
         observers.append(center.addObserver(forName:NSWorkspace.willSleepNotification,object:nil,queue:.main) { [weak self] _ in Task {@MainActor in self?.sleeping=true}})
         observers.append(center.addObserver(forName:NSWorkspace.didWakeNotification,object:nil,queue:.main) { [weak self] _ in Task {@MainActor in self?.sleeping=false}})
@@ -62,7 +62,7 @@ import Darwin
                     if Date().timeIntervalSince(lastHeartbeat)>=1 {try service.heartbeat();lastHeartbeat=Date()}
                     try publish(mode:control.mode)
                 }
-            } catch {self.error="采集存储状态异常："+error.localizedDescription;try? publish(mode:"preserve")}
+            } catch {self.error="采集存储状态异常："+error.localizedDescription;log("operation_failed",detail:self.error);try? publish(mode:"preserve")}
             try await Task.sleep(for:.milliseconds(200))
         }
         try await service.stop(reason:"recorder_exit")
