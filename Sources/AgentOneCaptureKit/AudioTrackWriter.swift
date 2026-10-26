@@ -94,7 +94,7 @@ public final class AudioTrackWriter: @unchecked Sendable {
                 MemoryDatabase.ms(date(for: pts)),MemoryDatabase.ms(date(for: pts)),TimeZone.current.identifier,
                 String(pts),String(hostAnchor),mapping,String(buffer.format.sampleRate),String(buffer.format.channelCount),relative,nil,
                 "recording",place,context,MemoryDatabase.now])
-            if source=="mixed" {journal=try PCMRecoveryJournal(id:id,directory:url.deletingLastPathComponent(),startedMS:Double(MemoryDatabase.ms(date(for:pts)))!,sampleRate:buffer.format.sampleRate,channels:Int(buffer.format.channelCount),context:context)}
+            if source=="mixed" {journal=try PCMRecoveryJournal(id:id,directory:url.deletingLastPathComponent(),startedMS:Double(MemoryDatabase.ms(date(for:pts)))!,sampleRate:buffer.format.sampleRate,channels:Int(buffer.format.channelCount),context:context,pulseURL:RecorderFiles.audioPulse(database.root))}
         }
         let reading = AudioActivityReading.measure(buffer)
         activity.observe(reading)

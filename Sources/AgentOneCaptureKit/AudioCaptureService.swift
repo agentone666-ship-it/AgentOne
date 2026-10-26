@@ -103,11 +103,14 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
 
 /// Native capture lifecycle only. It has no model credentials, chat or Agent tools.
 @MainActor public final class NativeAudioCaptureService {
+    public static var needsUserConsent:Bool {AVCaptureDevice.authorizationStatus(for:.audio) != .authorized || !CGPreflightScreenCaptureAccess()}
     public static func microphoneSelection() throws -> [String:String] {
         let device=try BuiltInMicrophone.device()
         return ["name":device.localizedName,"uid":device.uniqueID,"selection":"mac_builtin_only"]
     }
     public private(set) var isRecording = false
+    public private(set) var needsProcessRestart=false
+    public private(set) var recordingStartedMS:Double=0
     public private(set) var automaticDecisions = true
     public private(set) var preserveAllAudio = false
     public private(set) var microphoneWarning = ""
@@ -152,7 +155,14 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             if !allowPermissionPrompts, !CGPreflightScreenCaptureAccess() {
                 throw CaptureFailure.message("系统音权限不可用；请手动继续录音以检查授权")
             }
-            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            var discovered:SCShareableContent?
+            if allowPermissionPrompts,!CGPreflightScreenCaptureAccess() {
+                discovered=try await SCShareableContent.excludingDesktopWindows(false,onScreenWindowsOnly:true)
+            } else {
+                do {try await CaptureDeadline.perform(seconds:15,message:"系统音设备查询未响应，需要重新创建采集器") {discovered=try await SCShareableContent.excludingDesktopWindows(false,onScreenWindowsOnly:true)}}
+                catch {needsProcessRestart=true;throw error}
+            }
+            guard let content=discovered else {throw CaptureFailure.message("未取得系统音设备")}
             guard let display = content.displays.first else { throw CaptureFailure.message("没有可用显示器，无法启动系统音采集") }
             try database.recoverInterruptedSegments()
             self.automaticDecisions=automaticDecisions && !preserveAllAudio;self.preserveAllAudio=preserveAllAudio
@@ -174,7 +184,8 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             try capture.addStreamOutput(output, type: .screen, sampleHandlerQueue: output.inputQueue)
             sink = output; stream = capture
             output.beginMixing()
-            try await capture.startCapture()
+            do {try await CaptureDeadline.perform(seconds:15,message:"系统音启动未响应，需要重新创建采集器") {try await capture.startCapture()}}
+            catch {needsProcessRestart=true;throw error}
             microphoneWarning=""
             let microphoneSession=sessionToken
             let microphone = MicrophoneInput(deliver: { buffer,pts in output.enqueueMicrophone(buffer,presentationSeconds: pts) },fail: { [weak self] message in
@@ -191,11 +202,12 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             guard !failed,sink === output else {throw CaptureFailure.message("音频在启动期间中断，请重试")}
             try database.execute("UPDATE coverage SET ended_ms=? WHERE ended_ms IS NULL", [MemoryDatabase.now])
             isRecording = true
+            recordingStartedMS=Date().timeIntervalSince1970*1000
             try database.setCaptureState(self.automaticDecisions ? "listening":"recording", detail:decisionStatus.snapshot.detail)
         } catch {
             isRecording = false
             microphoneInput?.stop(); microphoneInput = nil
-            if let stream { try? await stream.stopCapture() }
+            if let stream { await stopStream(stream) }
             if let sink { try? await sink.finish() }
             stream = nil; sink = nil; releaseLock()
             try? database.setCaptureState("error", detail: "capture_start_failed")
@@ -212,7 +224,7 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
         activity.reset()
         microphoneInput?.stop(); microphoneInput = nil
         isRecording = false
-        if let stream { try? await stream.stopCapture() }
+        if let stream { await stopStream(stream) }
         let output = sink
         stream = nil; sink = nil
         defer { releaseLock() }
@@ -257,5 +269,9 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
     private func releaseLock() {
         if let recordingActivity {ProcessInfo.processInfo.endActivity(recordingActivity);self.recordingActivity=nil}
         if lockFD >= 0 { Darwin.lockf(lockFD, F_ULOCK, 0); Darwin.close(lockFD); lockFD = -1 }
+    }
+    private func stopStream(_ stream:SCStream) async {
+        do {try await CaptureDeadline.perform(seconds:3,message:"系统音停止未响应，需要重新创建采集器") {try await stream.stopCapture()}}
+        catch {needsProcessRestart=true}
     }
 }

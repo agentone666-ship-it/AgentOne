@@ -14,6 +14,12 @@ struct RecorderControl:Codable {
     var decisionSession:UUID?
     var sealNonce:String?
 }
+struct RecorderAudioPulse:Codable {
+    var pid=Int32(getpid())
+    var heartbeatMS=Date().timeIntervalSince1970*1000
+    var segmentID:String
+    var frames:Int64
+}
 struct RecorderSnapshot:Codable {
     var pid=Int32(getpid())
     var heartbeatMS=Date().timeIntervalSince1970*1000
@@ -25,10 +31,13 @@ struct RecorderSnapshot:Codable {
     var session=UUID()
     var inputs:[String:AudioInputTelemetry]=[:]
     var sealNonce:String?
+    var recordingStartedMS:Double?
+    var waitingForUserPermission:Bool?
 }
 enum RecorderFiles {
     static func control(_ root:URL)->URL {root.appendingPathComponent("recorder-control.json")}
     static func status(_ root:URL)->URL {root.appendingPathComponent("recorder-status.json")}
+    static func audioPulse(_ root:URL)->URL {root.appendingPathComponent("recorder-audio-pulse.json")}
     static func read<T:Decodable>(_ type:T.Type,from url:URL) throws -> T {
         guard (try url.resourceValues(forKeys:[.isSymbolicLinkKey]).isSymbolicLink) != true else {throw CaptureFailure.message("采集状态文件不能是符号链接")}
         let data=try Data(contentsOf:url);guard data.count<131072 else {throw CaptureFailure.message("采集状态文件过大")}

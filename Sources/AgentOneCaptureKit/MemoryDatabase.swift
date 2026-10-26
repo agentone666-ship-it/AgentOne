@@ -13,6 +13,14 @@ public final class MemoryDatabase: @unchecked Sendable {
     private var db: OpaquePointer?
     private let lock = NSRecursiveLock()
     private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+    private static func resource(_ name:String) -> URL? {
+        let packaged=Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/AgentOne_AgentOneCaptureKit.bundle")
+        if let bundle=Bundle(url:packaged),let url=bundle.url(forResource:name,withExtension:"sql") {return url}
+        // SwiftPM's generated CLI accessor points at the build machine when an
+        // executable is relocated. Never use that fallback in a packaged app.
+        if Bundle.main.bundleURL.pathExtension=="app" || ProcessInfo.processInfo.environment["AGENTONE_PACKAGED_RESOURCES_ONLY"]=="1" {return nil}
+        return Bundle.module.url(forResource:name,withExtension:"sql")
+    }
 
     public static var defaultRoot: URL {
         if let path = ProcessInfo.processInfo.environment["AGENTONE_MEMORY_HOME"], !path.isEmpty {
@@ -36,12 +44,12 @@ public final class MemoryDatabase: @unchecked Sendable {
             throw CaptureFailure.message("无法打开 Memory 数据库")
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
-        guard let schema = Bundle.module.url(forResource: "schema", withExtension: "sql") else {
+        guard let schema = Self.resource("schema") else {
             throw CaptureFailure.message("缺少 Memory schema")
         }
         try executeScript(String(contentsOf: schema, encoding: .utf8))
         if try rows("SELECT value FROM meta WHERE key='schema_version'").first?["value"] == "1" {
-            guard let migration=Bundle.module.url(forResource:"migrate-v2",withExtension:"sql") else {throw CaptureFailure.message("缺少混音数据升级脚本")}
+            guard let migration=Self.resource("migrate-v2") else {throw CaptureFailure.message("缺少混音数据升级脚本")}
             do {try executeScript(String(contentsOf:migration,encoding:.utf8))}
             catch {try? executeScript("ROLLBACK");try? executeScript("PRAGMA foreign_keys=ON");throw error}
             guard try rows("PRAGMA foreign_key_check").isEmpty else {throw CaptureFailure.message("混音数据升级关系校验失败")}

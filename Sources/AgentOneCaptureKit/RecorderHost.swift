@@ -45,6 +45,7 @@ import Darwin
                         else {service.metadata.update(place:nil,application:nil,bundleID:nil)}
                         let wasRecording=service.isRecording
                         do {
+                            if !wasRecording,control.allowPermissionPrompts,NativeAudioCaptureService.needsUserConsent {try publish(mode:control.mode,waitingForPermission:true)}
                             try await service.start(allowPermissionPrompts:control.allowPermissionPrompts,automaticDecisions:control.mode=="intelligent",preserveAllAudio:control.mode=="preserve")
                             if !wasRecording {log("started",detail:control.mode)}
                             error=""
@@ -63,13 +64,16 @@ import Darwin
                     try publish(mode:control.mode)
                 }
             } catch {self.error="采集存储状态异常："+error.localizedDescription;log("operation_failed",detail:self.error);try? publish(mode:"preserve")}
+            if service.needsProcessRestart {log("restart_required",detail:"native_operation_timeout");Darwin._exit(75)}
             try await Task.sleep(for:.milliseconds(200))
         }
         try await service.stop(reason:"recorder_exit")
     }
-    private func publish(mode:String) throws {
+    private func publish(mode:String,waitingForPermission:Bool=false) throws {
         var value=RecorderSnapshot();value.recording=service.isRecording;value.saving=service.isRecording && service.decisionStatus.snapshot.saving
         value.mode=mode;value.session=service.sessionToken;value.inputs=service.activity.telemetry();value.sealNonce=sealNonce
+        value.recordingStartedMS=service.recordingStartedMS
+        value.waitingForUserPermission=waitingForPermission
         value.detail=service.isRecording ? service.decisionStatus.snapshot.detail:error.isEmpty ? "后台采集已暂停":error
         value.warning=error.isEmpty ? service.microphoneWarning:error
         if service.isRecording,value.warning.isEmpty {

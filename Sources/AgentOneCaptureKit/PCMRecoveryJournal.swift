@@ -15,10 +15,12 @@ final class PCMRecoveryJournal {
     }
     private let raw:URL,sidecar:URL
     private let file:FileHandle
+    private let pulseURL:URL?
     private var info:Info
     private var synced:Int64=0
     var frames:Int64 {info.frames}
-    init(id:String,directory:URL,startedMS:Double,sampleRate:Double,channels:Int,context:String) throws {
+    init(id:String,directory:URL,startedMS:Double,sampleRate:Double,channels:Int,context:String,pulseURL:URL? = nil) throws {
+        self.pulseURL=pulseURL
         raw=directory.appendingPathComponent(id+".pcm");sidecar=directory.appendingPathComponent(id+".pcm.json")
         info=Info(id:id,startedMS:startedMS,sampleRate:sampleRate,channels:channels,context:context)
         guard FileManager.default.createFile(atPath:raw.path,contents:nil,attributes:[.posixPermissions:0o600]) else {throw CaptureFailure.message("无法创建录音恢复日志")}
@@ -34,7 +36,11 @@ final class PCMRecoveryJournal {
             for frame in 0..<count {for channel in 0..<channels {output[frame*channels+channel]=buffer.format.isInterleaved ? input[0][frame*channels+channel]:input[channel][frame]}}
         }
         try file.write(contentsOf:data);info.frames+=Int64(count);info.context=context
-        if info.frames-synced>=Int64(info.sampleRate) {try file.synchronize();try RecorderFiles.write(info,to:sidecar);synced=info.frames}
+        if info.frames-synced>=Int64(info.sampleRate) {
+            try file.synchronize();try RecorderFiles.write(info,to:sidecar)
+            if let pulseURL {try RecorderFiles.write(RecorderAudioPulse(segmentID:info.id,frames:info.frames),to:pulseURL)}
+            synced=info.frames
+        }
     }
     func removeAfterSeal() throws {
         try file.synchronize();try file.close()

@@ -383,7 +383,12 @@ import SwiftUI
         updateMetadata()
         systemReceiving = listening && (service?.activity.hasSamples(source: "system_audio") ?? false)
         microphoneReceiving = listening && (service?.activity.hasSamples(source: "microphone") ?? false)
-        inputWarning = listening ? service?.microphoneWarning ?? "":""
+        let warning=desiredRecording && !suspended ? service?.microphoneWarning ?? "":""
+        if inputWarning != warning {
+            inputWarning=warning
+            if !warning.isEmpty,!busy {expanded=true;pinned=true}
+        }
+        if hasError,message.hasPrefix("自动记录尚未开始："),service?.isRecording==true,warning.isEmpty {hasError=false;message="后台采集已恢复，系统声音与 Mac 内置麦克风持续保存"}
         systemHasSound = listening && (service?.activity.hasSound(source: "system_audio") ?? false)
         microphoneHasSound = listening && (service?.activity.hasSound(source: "microphone") ?? false)
         do {

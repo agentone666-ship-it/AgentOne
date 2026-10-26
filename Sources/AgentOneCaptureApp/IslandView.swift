@@ -98,7 +98,7 @@ struct IslandView: View {
         VStack(alignment: .leading,spacing: 16) {
             HStack {
                 VStack(alignment: .leading,spacing: 6) {
-                    Text(model.recording ? "正在保留今天的声音" : model.listening ? "正在听候新的声音" : model.hasError ? "自动记录需要处理" : "让记忆从这里开始").font(.system(size: 22,weight: .semibold))
+                    Text(!model.inputWarning.isEmpty || model.hasError ? "自动记录需要处理" : model.recording ? "正在保留今天的声音" : model.listening ? "正在听候新的声音" : "让记忆从这里开始").font(.system(size: 22,weight: .semibold))
                     Text("声音、时间、地点，留给未来的你。").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
                 }
                 Spacer()

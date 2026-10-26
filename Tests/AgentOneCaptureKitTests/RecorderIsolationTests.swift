@@ -102,3 +102,35 @@ struct RecorderWatermarkTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath:root.appendingPathComponent("Audio").path).count==1)
     }
 }
+
+@MainActor struct RecorderDeadlineTests {
+    @Test func missingFrameworkCompletionCannotHoldTheCallerForever() async throws {
+        var parked:CheckedContinuation<Void,Never>?
+        let start=Date()
+        do {
+            try await CaptureDeadline.perform(seconds:0.05,message:"fixture timeout") {
+                await withCheckedContinuation {parked=$0}
+            }
+            Issue.record("A missing framework completion must time out")
+        } catch {#expect(error.localizedDescription=="fixture timeout")}
+        #expect(Date().timeIntervalSince(start)<2)
+        parked?.resume()
+        try await Task.sleep(for:.milliseconds(30)) // Late completion cannot resume twice.
+    }
+    @Test func watchdogNeedsRealDiskProgressAndHonorsManualPause() {
+        let policy=RecorderWatchdog(),pid:Int32=42
+        var status=RecorderSnapshot();status.pid=pid;status.recording=true;status.recordingStartedMS=0;status.heartbeatMS=100_000
+        var pulse=RecorderAudioPulse(segmentID:"fixture",frames:48000);pulse.pid=pid;pulse.heartbeatMS=100_000
+        #expect(!policy.shouldRestart(now:101_000,launched:0,pid:pid,status:status,pulse:pulse,desired:true))
+        status.heartbeatMS=70_000
+        #expect(!policy.shouldRestart(now:101_000,launched:0,pid:pid,status:status,pulse:pulse,desired:true)) // Audio still progresses.
+        #expect(policy.shouldRestart(now:101_000,launched:0,pid:pid,status:status,pulse:pulse,desired:false)) // Pause must be actionable.
+        pulse.heartbeatMS=70_000;status.heartbeatMS=100_000
+        #expect(policy.shouldRestart(now:101_000,launched:0,pid:pid,status:status,pulse:pulse,desired:true)) // Fresh UI status cannot hide a dead writer.
+        status.recording=false
+        #expect(!policy.shouldRestart(now:101_000,launched:0,pid:pid,status:status,pulse:pulse,desired:false))
+        status.waitingForUserPermission=true;status.heartbeatMS=0
+        #expect(!policy.shouldRestart(now:101_000,launched:0,pid:pid,status:status,pulse:pulse,desired:true))
+        #expect(policy.shouldRestart(now:101_000,launched:0,pid:pid,status:status,pulse:pulse,desired:false))
+    }
+}
