@@ -101,13 +101,19 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
     private var sink: AudioStreamSink?
     private var microphoneInput: MicrophoneInput?
     private var lockFD: Int32 = -1
-    private var stoppingTask: Task<Void, Error>?
+    private let sessions = CaptureSessionCoordinator()
     public var onFailure: (@MainActor @Sendable (String) -> Void)?
 
     public init(database: MemoryDatabase) { self.database = database }
 
     public func start(allowPermissionPrompts: Bool,automaticDecisions:Bool=true,preserveAllAudio:Bool=false) async throws {
-        if let stoppingTask { try await stoppingTask.value }
+        let mode: CaptureSessionCoordinator.Mode = preserveAllAudio ? .preserve : automaticDecisions ? .intelligent : .manual
+        try await sessions.start(mode: mode, start: {
+            try await self.startSession(allowPermissionPrompts: allowPermissionPrompts, automaticDecisions: automaticDecisions, preserveAllAudio: preserveAllAudio)
+        }, stop: { try await self.performStop(reason: $0) })
+    }
+
+    private func startSession(allowPermissionPrompts: Bool,automaticDecisions:Bool,preserveAllAudio:Bool) async throws {
         guard !isRecording, stream == nil else { return }
         guard #available(macOS 15, *) else { throw CaptureFailure.message("双路原生录音需要 macOS 15 或更新版本") }
         lockFD = Darwin.open(database.root.appendingPathComponent("capture.lock").path, O_CREAT | O_RDWR, 0o600)
@@ -168,11 +174,7 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
     }
 
     public func stop(reason: String = "user_paused") async throws {
-        if let stoppingTask { try await stoppingTask.value; return }
-        let task = Task { @MainActor in try await self.performStop(reason: reason) }
-        stoppingTask = task
-        defer { stoppingTask = nil }
-        try await task.value
+        try await sessions.stop(reason: reason) { try await self.performStop(reason: $0) }
     }
 
     private func performStop(reason: String) async throws {

@@ -187,7 +187,13 @@ import SwiftUI
         if automaticLocation {locationService.start(requestPermission:false)}
         updateMetadata()
         do {
-            try await service.start(allowPermissionPrompts:prompts,automaticDecisions:automaticRecording && captureMode=="intelligent",preserveAllAudio:automaticRecording && captureMode=="preserve")
+            // Settings can change while device permission/start awaits. Reconcile
+            // the latest selection before publishing success; start serializes
+            // stop/seal/restart when an existing session uses a different gate.
+            repeat {
+                try await service.start(allowPermissionPrompts:prompts,automaticDecisions:automaticRecording && captureMode=="intelligent",preserveAllAudio:automaticRecording && captureMode=="preserve")
+                if suspended || !desiredRecording { break }
+            } while service.automaticDecisions != (automaticRecording && captureMode=="intelligent") || service.preserveAllAudio != (automaticRecording && captureMode=="preserve")
             if suspended || !desiredRecording { try await service.stop(reason: "start_cancelled"); return }
             listening = service.isRecording
             recording = service.isRecording && service.decisionStatus.snapshot.saving
@@ -316,7 +322,7 @@ import SwiftUI
         guard !demo,["preserve","intelligent"].contains(value),captureMode != value else {return}
         captureMode=value;UserDefaults.standard.set(value,forKey:"vNext.captureMode")
         if listening {
-            Task {await stop(reason:"capture_mode_changed");if desiredRecording {await start(prompts:false)}}
+            Task {if desiredRecording {await start(prompts:false)}}
         }
     }
 
