@@ -103,7 +103,7 @@ class OpenAIResponsesMock {
 
     this.successTurn += 1;
     const isChatCompletions = request.url?.endsWith("/chat/completions") === true;
-    const isAnthropicMessages = request.url?.endsWith("/v1/messages") === true;
+    const isAnthropicMessages = new URL(request.url ?? "/", "http://localhost").pathname.endsWith("/v1/messages");
     const tools = Array.isArray(body.tools) ? body.tools : [];
     if (isAnthropicMessages) {
       const isContextEnrichment = JSON.stringify(body.system ?? "").includes("activity_title");
@@ -777,7 +777,7 @@ test("Kimi OAuth routing takes precedence and uses the Anthropic Messages contra
       assert.ok(first);
       assert.ok(second);
       assert.equal(first.method, "POST");
-      assert.equal(first.url, "/coding/v1/messages");
+      assert.equal(first.url, "/coding/v1/messages?beta=true");
       assert.equal(first.apiKey, accessToken);
       assert.equal(first.authorization, undefined);
       assert.equal(first.anthropicVersion, "2023-06-01");
@@ -793,7 +793,7 @@ test("Kimi OAuth routing takes precedence and uses the Anthropic Messages contra
       assert.notEqual(first.apiKey, "sk-api-key-must-not-win");
       assert.match(JSON.stringify(first.body), /Attention and Executive Function/u);
 
-      assert.equal(second.url, "/coding/v1/messages");
+      assert.equal(second.url, "/coding/v1/messages?beta=true");
       assert.equal(second.apiKey, accessToken);
       assert.deepEqual(second.kimiHeaders, expectedDeviceHeaders);
       assert.equal(second.accept, "application/json");
@@ -818,7 +818,7 @@ test("Kimi OAuth routing takes precedence and uses the Anthropic Messages contra
       assert.equal(mock.requests.length, before + 1);
       const request = mock.requests.at(-1);
       assert.ok(request);
-      assert.equal(request.url, "/coding/v1/messages");
+      assert.equal(request.url, "/coding/v1/messages?beta=true");
       assert.equal(request.apiKey, accessToken);
       assert.deepEqual(request.kimiHeaders, expectedDeviceHeaders);
       assert.equal(request.body.model, "kimi-for-coding");
@@ -854,7 +854,7 @@ test("Kimi OAuth routing takes precedence and uses the Anthropic Messages contra
       assert.equal(mock.requests.length, before + 1);
       const request = mock.requests.at(-1);
       assert.ok(request);
-      assert.equal(request.url, "/coding/v1/messages");
+      assert.equal(request.url, "/coding/v1/messages?beta=true");
       assert.deepEqual(
         request.body.thinking,
         { type: "disabled" },
