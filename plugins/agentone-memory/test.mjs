@@ -221,3 +221,16 @@ test('failed v1 relationship validation rolls the schema upgrade back instead of
   unchanged.close();
  }finally{rmSync(root,{recursive:true,force:true})}
 });
+
+test('real host handshake is visible while native self-check never pretends to connect an Agent',async()=>{
+  const f=fixture();const server=fileURLToPath(new URL('./server.mjs',import.meta.url));const client=new MCPClient(server,f.root);
+  try {
+    const before=Date.now();
+    await client.request('initialize',{protocolVersion:'2025-06-18',clientInfo:{name:'example\n-agent',version:'1.0'}});
+    const first=JSON.parse(f.store.db.prepare("SELECT value FROM meta WHERE key='last_agent_connection'").get().value);
+    assert.equal(first.name,'example-agent');assert.equal(first.transport,'stdio');assert.ok(first.connected_ms>=before && first.connected_ms<=Date.now());
+    await client.request('initialize',{protocolVersion:'2025-06-18',clientInfo:{name:'agentone-connection-check',version:'1'}});
+    const after=JSON.parse(f.store.db.prepare("SELECT value FROM meta WHERE key='last_agent_connection'").get().value);
+    assert.deepEqual(after,first);
+  } finally {await client.close();f.close()}
+});

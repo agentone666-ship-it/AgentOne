@@ -27,7 +27,10 @@ try {
   const plist=JSON.parse(run('plutil',['-convert','json','-o','-',join(app,'Contents/Info.plist')]));
   assert.equal(plist.CFBundleShortVersionString,readFileSync('VERSION','utf8').trim());
   assert.equal(plist.LSMinimumSystemVersion,'15.0');
-  for(const key of ['NSMicrophoneUsageDescription','NSAudioCaptureUsageDescription','NSSpeechRecognitionUsageDescription']) assert.ok(plist[key]);
+  for(const key of ['NSMicrophoneUsageDescription','NSAudioCaptureUsageDescription','NSSpeechRecognitionUsageDescription','NSLocationUsageDescription']) assert.ok(plist[key]);
+  const plugin=JSON.parse(readFileSync(join(app,'Contents/Resources/agentone-memory/plugin.json'),'utf8'));
+  assert.equal(plugin.version,plist.CFBundleShortVersionString);
+  assert.ok(existsSync(join(app,'Contents/Resources/agentone-memory/skills/recall-and-act/SKILL.md')));
   const symbols=run('nm',['-j',executable]);
   assert.doesNotMatch(symbols,/AgentOnePiRuntime|PiSidecarBridge|AgentOneModelAuth/);
   const root=join(temporary,'memory');mkdirSync(root);

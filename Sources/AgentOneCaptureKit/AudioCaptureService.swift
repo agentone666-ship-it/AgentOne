@@ -9,11 +9,13 @@ public final class CaptureMetadata: @unchecked Sendable {
     private var place: String?
     private var context = "{}"
     public init() {}
-    public func update(place: String?, application: String?, bundleID: String?) {
+    public func update(place: String?, application: String?, bundleID: String?, location:LocationObservation? = nil) {
         lock.lock(); defer { lock.unlock() }
-        self.place = place?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-        let value: [String: Any] = ["application": application ?? NSNull(), "bundle_identifier": bundleID ?? NSNull(),
-            "observed_at": ISO8601DateFormatter().string(from: Date()), "place_source": self.place == nil ? "unknown" : "user_annotation"]
+        let fresh=location.flatMap {$0.isFresh() ? $0:nil}
+        self.place = location != nil ? fresh?.displayName:place?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        var value: [String: Any] = ["application": application ?? NSNull(), "bundle_identifier": bundleID ?? NSNull(),
+            "observed_at": ISO8601DateFormatter().string(from: Date()), "place_source": fresh != nil ? "core_location" : self.place == nil ? "unknown" : "user_annotation"]
+        if let fresh {value["location"]=fresh.json}
         context = (try? JSONSerialization.data(withJSONObject: value)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
     }
     func snapshot() -> (String?, String) { lock.lock(); defer { lock.unlock() }; return (place,context) }

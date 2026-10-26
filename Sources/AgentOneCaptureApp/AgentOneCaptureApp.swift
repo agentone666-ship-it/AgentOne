@@ -25,7 +25,15 @@ import SwiftUI
     @Published var systemHasSound = false
     @Published var microphoneHasSound = false
     @Published var loginStatus = ""
-    @Published var place = UserDefaults.standard.string(forKey: "vNext.place") ?? ""
+    @Published private(set) var place = ""
+    @Published var automaticLocation = (UserDefaults.standard.object(forKey:"vNext.automaticLocation") as? Bool) ?? true
+    @Published var locationStatus = "等待自动定位"
+    @Published var connectionMode = UserDefaults.standard.string(forKey:"vNext.connectionMode") ?? "plugin"
+    @Published var connectionStatus = "可生成插件或复制 MCP 配置"
+    @Published var lastAgentConnection = "尚未收到 Agent 连接"
+    @Published var connectionBusy = false
+    private var exportedPlugin:URL?
+    let locationService=AutomaticLocationService()
     @Published var autoResume = (UserDefaults.standard.object(forKey: "vNext.autoResume") as? Bool) ?? true
     @Published var pauseOnLock = (UserDefaults.standard.object(forKey: "vNext.pauseOnLock") as? Bool) ?? true
     @Published var query = ""
@@ -69,7 +77,10 @@ import SwiftUI
             if !self.automaticRecording { self.desiredRecording = false; UserDefaults.standard.set(false,forKey: "vNext.captureDesired") }
             Task { await self.stop(reason: "stream_error"); self.message = message }
         }
-        eventService?.place = { [weak self] in self?.place }
+        eventService?.place = { [weak self] in self?.locationService.observation?.displayName }
+        locationService.onChange = { [weak self] in
+            guard let self else {return};self.locationStatus=self.locationService.status;self.updateMetadata()
+        }
         worker?.enabled = localASR
         audioExport = (try? db?.rows("SELECT value FROM meta WHERE key='allow_audio_export'").first?["value"]) == "1"
     }
@@ -145,6 +156,7 @@ import SwiftUI
         case .paused: message = "自动记录已手动暂停；点击恢复后继续"
         case .inactive: message = "自动记录已关闭；可以手动开始"
         }
+        if automaticLocation && desiredRecording && !UserDefaults.standard.bool(forKey:"vNext.locationSetupAttempted") {requestLocationAccess()}
         refresh()
     }
 
@@ -168,6 +180,7 @@ import SwiftUI
     private func start(prompts: Bool) async {
         guard !busy, !suspended, let service else { return }
         busy = true; defer { busy = false }
+        if automaticLocation {locationService.start(requestPermission:false)}
         updateMetadata()
         do {
             try await service.start(allowPermissionPrompts: prompts)
@@ -189,7 +202,7 @@ import SwiftUI
     }
 
     func stop(reason: String) async {
-        eventService?.stop()
+        eventService?.stop();locationService.stop(status:"录音已暂停，定位同步暂停")
         do { try await service?.stop(reason: reason) }
         catch { message = "录音已停止，但末段封口失败；原文件保留为待恢复" }
         listening = false;recording = false;audioLevels=[Double](repeating:0,count:5)
@@ -238,9 +251,61 @@ import SwiftUI
     }
     func updateMetadata() {
         guard !demo else { return }
-        UserDefaults.standard.set(place, forKey: "vNext.place")
+        let observation=automaticLocation ? locationService.observation:nil
+        let label=observation?.displayName ?? ""
+        if place != label {place=label}
         let app = NSWorkspace.shared.frontmostApplication
-        service?.metadata.update(place: place, application: app?.localizedName, bundleID: app?.bundleIdentifier)
+        service?.metadata.update(place: place, application: app?.localizedName, bundleID: app?.bundleIdentifier,location:observation)
+    }
+
+    func requestLocationAccess() {
+        guard !demo else {return}
+        UserDefaults.standard.set(true,forKey:"vNext.locationSetupAttempted")
+        NSApp.activate(ignoringOtherApps:true)
+        locationService.start(requestPermission:true)
+    }
+    func setAutomaticLocation(_ value:Bool) {
+        guard !demo else {return}
+        automaticLocation=value;UserDefaults.standard.set(value,forKey:"vNext.automaticLocation")
+        if value {requestLocationAccess()} else {locationService.stop()}
+        updateMetadata()
+    }
+    func openLocationSettings() {if let url=URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices") {NSWorkspace.shared.open(url)}}
+    private func connectionPackage() throws -> AgentConnectionPackage {
+        guard let database,let node=AgentConnectionPackage.findNode() else {throw CaptureFailure.message("需要安装 Node.js 22.19 或更新版本，才能连接本机记忆")}
+        let bundled=Bundle.main.resourceURL?.appendingPathComponent("agentone-memory")
+        let development=URL(fileURLWithPath:#filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("plugins/agentone-memory")
+        let resources=bundled.flatMap {FileManager.default.fileExists(atPath:$0.appendingPathComponent("server.mjs").path) ? $0:nil} ?? development
+        return AgentConnectionPackage(resources:resources,memoryRoot:database.root,node:node)
+    }
+    func preparePlugin(reveal:Bool) {
+        guard !demo else {return}
+        do {
+            let root=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/AgentOne/Connections")
+            let exported=try exportedPlugin ?? connectionPackage().export(to:root)
+            exportedPlugin=exported
+            if reveal {NSWorkspace.shared.activateFileViewerSelecting([exported])}
+            else {
+                let guide=try String(contentsOf:exported.appendingPathComponent("接入说明.txt"),encoding:.utf8)
+                NSPasteboard.general.clearContents();NSPasteboard.general.setString(guide,forType:.string)
+            }
+            connectionStatus=reveal ? "插件已生成；请在 Agent 中导入，随后检查连接":"插件接入说明已复制，可交给你的 Agent 安装"
+        } catch {connectionStatus=error.localizedDescription}
+    }
+    func copyMCPConfiguration() {
+        guard !demo else {return}
+        do {let text=try connectionPackage().configurationText();NSPasteboard.general.clearContents();NSPasteboard.general.setString(text,forType:.string);connectionStatus="MCP 配置已复制；添加到宿主后即可连接"}
+        catch {connectionStatus=error.localizedDescription}
+    }
+    func checkAgentConnection() {
+        guard !demo,!connectionBusy else {return}
+        connectionBusy=true;connectionStatus="正在检查本机连接服务…"
+        Task {
+            defer {connectionBusy=false}
+            do {let package=try connectionPackage();let count=try await Task.detached(priority:.utility) {try package.connectionCheck()}.value;connectionStatus="本机服务正常 · \(count) 个工具；等待 Agent 导入或调用"}
+            catch {connectionStatus=error.localizedDescription}
+            refresh()
+        }
     }
 
     func setAutomaticRecording(_ value: Bool) {
@@ -299,6 +364,9 @@ import SwiftUI
         microphoneHasSound = listening && (service?.activity.hasSound(source: "microphone") ?? false)
         do {
             try database.execute("INSERT INTO meta VALUES ('local_asr_status',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[worker?.status ?? "本机转写不可用"])
+            if let raw=try database.rows("SELECT value FROM meta WHERE key='last_agent_connection'").first?["value"],let data=raw.data(using:.utf8),let host=try JSONSerialization.jsonObject(with:data) as? [String:Any],let name=host["name"] as? String,let ms=host["connected_ms"] as? Double {
+                lastAgentConnection="最近连接："+name+" · "+Date(timeIntervalSince1970:ms/1000).formatted(date:.abbreviated,time:.shortened)
+            }
             eventCaptureStatus=eventService?.status ?? "事件服务不可用"
             eventCount=Int(try database.rows("SELECT COUNT(*) AS count FROM context_events WHERE hidden=0").first?["count"] ?? "0") ?? 0
             eventRows=try database.rows("SELECT * FROM context_events WHERE hidden=0 AND (?='' OR instr(lower(COALESCE(title,'')||text||COALESCE(application,'')||COALESCE(url,'')),lower(?))>0) ORDER BY started_ms DESC LIMIT 30",[query,query])

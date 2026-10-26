@@ -38,9 +38,11 @@ fi
 
 plugin_resources="$contents_dir/Resources/agentone-memory"
 mkdir -p "$plugin_resources"
-for resource in server.mjs store.mjs recall.mjs schema.sql migrate-v2.sql README.md; do
+for resource in server.mjs store.mjs recall.mjs schema.sql migrate-v2.sql README.md plugin.json mcp.json .mcp.json; do
     cp "$project_dir/plugins/agentone-memory/$resource" "$plugin_resources/$resource"
 done
+
+cp -R "$project_dir/plugins/agentone-memory/.codex-plugin" "$project_dir/plugins/agentone-memory/skills" "$plugin_resources/"
 
 cp "$project_dir/tools/laya-decision/worker.py" "$contents_dir/Resources/laya-worker.py"
 
@@ -67,6 +69,10 @@ cat > "$contents_dir/Info.plist" <<'PLIST'
     <string>15.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSLocationUsageDescription</key>
+    <string>AgentOne uses system location to automatically attach a place, accuracy and sample time to your local recordings and activity memory.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>AgentOne automatically adds your system location to local recording memory.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>AgentOne automatically mixes microphone input with system audio into one recording for your personal audio memory after you grant permission. You can pause automatic recording from the island.</string>
     <key>NSAudioCaptureUsageDescription</key>

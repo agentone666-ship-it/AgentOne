@@ -37,6 +37,8 @@ Diary/
 Evidence/
 Memory/
 Skills/
+!plugins/agentone-memory/skills/
+!plugins/agentone-memory/skills/**
 Model Invocations/
 Audio/
 memory.sqlite

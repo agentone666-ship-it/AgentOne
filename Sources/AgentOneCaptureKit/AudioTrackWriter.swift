@@ -107,12 +107,30 @@ public final class AudioTrackWriter: @unchecked Sendable {
         let hash = SHA256.hash(data: try Data(contentsOf: finalURL)).map { String(format: "%02x", $0) }.joined()
         let relative = String(finalURL.path.dropFirst(database.root.path.count + 1))
         var context = (segmentContext.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? [:]
+        let (lastPlace,lastContext)=metadata()
+        var discoveredPlace:String?
+        // A first fix can arrive after the segment opens. Retain its real sample time;
+        // never project a later location backwards onto a finished recording.
+        let locationFormatter=ISO8601DateFormatter();locationFormatter.formatOptions=[.withInternetDateTime,.withFractionalSeconds]
+        if let data=lastContext.data(using:.utf8),let last=try? JSONSerialization.jsonObject(with:data) as? [String:Any],
+           let point=last["location"] as? [String:Any],let stamp=point["observed_at"] as? String,
+           let sampled=locationFormatter.date(from:stamp) ?? ISO8601DateFormatter().date(from:stamp),sampled>=date(for:firstPTS).addingTimeInterval(-1),sampled<=date(for:endPTS) {
+            var observations=(context["location"] as? [String:Any]).map {[$0]} ?? []
+            if !observations.contains(where:{$0["observed_at"] as? String==stamp}) {observations.append(point)}
+            context["location_observations"]=observations
+            if context["location"]==nil && context["place_source"] as? String != "user_annotation" {
+                context["location"]=point;context["place_source"]="core_location";context["place_temporal_scope"]="sampled_during_segment";discoveredPlace=lastPlace
+            } else if (context["location"] as? [String:Any])?["observed_at"] as? String == stamp {
+                // Address resolution refines the same fix; it is not a newer position.
+                context["location"]=point;discoveredPlace=lastPlace
+            }
+        }
         context["audio_activity"] = activity.json
         if let data=finishingContext().data(using:.utf8),let extra=try JSONSerialization.jsonObject(with:data) as? [String:Any] {context.merge(extra) {_,new in new}}
         let contextJSON = String(decoding: try JSONSerialization.data(withJSONObject: context),as: UTF8.self)
         try database.transaction {
-            try database.execute("UPDATE segments SET ended_ms=?,relative_path=?,sha256=?,context_json=?,state='sealed' WHERE id=?",
-                [MemoryDatabase.ms(date(for: endPTS)),relative,hash,contextJSON,id])
+            try database.execute("UPDATE segments SET ended_ms=?,relative_path=?,sha256=?,context_json=?,place=COALESCE(?,place),state='sealed' WHERE id=?",
+                [MemoryDatabase.ms(date(for: endPTS)),relative,hash,contextJSON,discoveredPlace,id])
             try database.execute("INSERT OR IGNORE INTO jobs (id,segment_id,stage,source_hash,state,created_ms,updated_ms) VALUES (?,?,'transcribe',?,'pending',?,?)",
                 [UUID().uuidString,id,hash,MemoryDatabase.now,MemoryDatabase.now])
         }

@@ -120,7 +120,12 @@ struct IslandView: View {
             }.padding(16).frame(maxWidth:.infinity,alignment:.leading).background(.white.opacity(0.055),in:RoundedRectangle(cornerRadius:16))
             HStack {
                 Label("地点",systemImage: "mappin.and.ellipse").foregroundStyle(.white.opacity(0.4))
-                TextField("添加地点，例如：工位",text: $model.place).textFieldStyle(.plain).onChange(of: model.place) { _,_ in model.updateMetadata() }
+                VStack(alignment:.leading,spacing:3) {
+                    Text(model.place.isEmpty ? "地点未知":model.place).lineLimit(1)
+                    Text(model.locationStatus).font(.system(size:9)).foregroundStyle(.white.opacity(0.35))
+                }
+                Spacer()
+                Image(systemName:"location.fill").foregroundStyle(accent).accessibilityLabel("系统自动定位")
             }.font(.system(size: 11)).padding(11).background(.white.opacity(0.045),in: RoundedRectangle(cornerRadius: 10))
             Button { model.toggleRecording() } label: {
                 HStack(spacing: 8) { Image(systemName: model.listening ? "pause.fill" : "record.circle"); Text(model.busy ? "正在启动…" : model.listening ? "暂停记录" : model.automaticRecording ? "恢复自动记录" : "开启录音") }
@@ -206,8 +211,15 @@ struct IslandView: View {
     private var settingsPage: some View {
         ScrollView {
             VStack(alignment: .leading,spacing: 16) {
+                agentConnectionSection
+                Divider().overlay(.white.opacity(0.08))
                 Text("记录偏好").font(.system(size: 17,weight: .semibold))
                 VStack(alignment: .leading,spacing: 14) {
+                    Toggle("自动获取录音地点",isOn:Binding(get:{model.automaticLocation},set:{model.setAutomaticLocation($0)}))
+                    Text(model.locationStatus).font(.system(size:10)).foregroundStyle(.white.opacity(0.4))
+                    Text("使用系统定位与地址解析，保存坐标、精度和采样时间；无法判断具体工位或房间。未授权或失败时记为未知。").font(.system(size:10)).foregroundStyle(.white.opacity(0.4))
+                    HStack {Button("允许／刷新定位") {model.requestLocationAccess()};Spacer();Button("定位设置") {model.openLocationSettings()}}.font(.system(size:10))
+                    Divider().overlay(.white.opacity(0.08))
                     Toggle("记录应用、网页和交互事件",isOn:Binding(get:{model.eventCaptureEnabled},set:{model.setEventCapture($0)}))
                     Text(model.eventCaptureStatus).font(.system(size:10)).foregroundStyle(.white.opacity(0.4))
                     Button("检查事件详情权限") {model.eventService?.requestDetailsPermission()}.font(.system(size:10))
@@ -231,6 +243,25 @@ struct IslandView: View {
                 Text("查找线索、提取长期记忆和执行待办，由你连接的 Agent 完成。").font(.system(size: 10)).foregroundStyle(.white.opacity(0.35))
             }.padding(.bottom,6)
         }
+    }
+    private var agentConnectionSection:some View {
+        VStack(alignment:.leading,spacing:12) {
+            HStack {Label("连接 Agent",systemImage:"puzzlepiece.extension").font(.system(size:17,weight:.semibold));Spacer();Text("本机连接").font(.system(size:10)).foregroundStyle(accent)}
+            Picker("接入方式",selection:$model.connectionMode) {Text("插件 · 推荐").tag("plugin");Text("MCP").tag("mcp")}.pickerStyle(.segmented)
+                .onChange(of:model.connectionMode) {_,value in UserDefaults.standard.set(value,forKey:"vNext.connectionMode")}
+            Text(model.connectionMode=="plugin" ? "把记忆工具和回忆工作流一起交给 Agent，支持导入本地插件的桌面宿主。":"复制配置到支持本机 stdio MCP 的宿主，使用同一套记忆与录音工具。").font(.system(size:11)).foregroundStyle(.white.opacity(0.55))
+            HStack(spacing:12) {
+                if model.connectionMode=="plugin" {
+                    Button("生成插件并打开") {model.preparePlugin(reveal:true)}
+                    Button("复制接入说明") {model.preparePlugin(reveal:false)}
+                } else {Button("复制 MCP 配置") {model.copyMCPConfiguration()}}
+                Spacer()
+                Button(model.connectionBusy ? "检查中…":"检查服务") {model.checkAgentConnection()}.disabled(model.connectionBusy)
+            }.font(.system(size:10)).tint(accent)
+            Text(model.connectionStatus).font(.system(size:10)).foregroundStyle(.white.opacity(0.45)).fixedSize(horizontal:false,vertical:true)
+            Text(model.lastAgentConnection).font(.system(size:10)).foregroundStyle(accent.opacity(0.8))
+            Text("插件不会自动开启原音访问，也不会让关闭的 Agent 持续分析。资料被宿主读取后，可能交给它使用的云模型。").font(.system(size:10)).foregroundStyle(.white.opacity(0.35))
+        }.padding(14).background(.white.opacity(0.045),in:RoundedRectangle(cornerRadius:14)).disabled(model.demo)
     }
     private func time(_ value: String?) -> String {
         guard let value,let ms = Double(value) else { return "未知时间" }

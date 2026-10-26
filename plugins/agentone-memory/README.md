@@ -1,6 +1,14 @@
-# AgentOne Memory：通用 MCP
+# AgentOne Memory：本地插件与通用 MCP
 
 Node.js 22.19+。不绑定 Codex、DeepSeek 或其他宿主，不包含 Agent Runtime。
+
+## 推荐：从灵动岛连接
+
+设置 → 连接 Agent 默认推荐插件。「生成插件并打开」导出自包含本机包（portable plugin.json、mcp.json、Codex 兼容 manifest 与 recall-and-act 工作流），并附本地 marketplace 入口和接入说明。导出配置使用实际 Node 与 Memory 路径；服务使用 `${PLUGIN_ROOT}`，可随包迁移。导出不复制数据库、录音或定位内容。
+
+宿主需要支持本机 stdio MCP；纯云端环境不能直接读这台 Mac。MCP 模式可直接复制配置。「检查服务」会握手并确认工具；它不证明宿主已安装。真实宿主连接后，设置页显示其自报名称与最近连接时间，不能当作身份认证或持续在线证明。
+
+仓库内也提供 `.agents/plugins/marketplace.json`，供本地开发导入。插件用法见 `skills/recall-and-act/SKILL.md`。不运行独立 Agent，不自动开启原音读取或为关闭的宿主做调度。
 
 ## 运行
 
@@ -66,3 +74,5 @@ SQLite 元数据与查询不会只读取最近一天，因此旧记录仍可查�
 旧 `personal-context-memory` 插件与原 Diary 保留。原生 App 启动或“同步旧记录”时将可见非敏感活动投影到事件索引，不改写原文件；本服务可关联旧事件与新音频。宿主可使用 `recall_and_act` prompt；真实效果与当前缺口见 [benchmark](../../benchmarks/recall/README.md)。
 
 0.2.5 新音频 source 为 `mixed`，一个文件对应一份转写和分析任务。`system_audio` / `microphone` 仅继续用于兼容旧历史；支持 source 过滤。共享 schema v2 会原子升级 v1 的来源约束，保留所有旧 ID、哈希、任务和引用。
+
+0.2.7 的新录音在 context_json 保留自动定位来源、坐标、精度、采样时间与可读地址；段内首次获得的位置带 sampled_during_segment 限定。定位是线索，不证明工位、房间或人物在场；历史手动标注仍保留 user_annotation 含义。
