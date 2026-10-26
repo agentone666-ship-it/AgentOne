@@ -116,6 +116,19 @@ public final class MemoryDatabase: @unchecked Sendable {
                     [state, detail, Self.now])
     }
 
+    /// Model audit is optional. Use its own non-waiting connection so a busy
+    /// preview row cannot hold the recorder's database lock or stop PCM writes.
+    func tryRecordDecisionAudit(_ json:String) -> Bool {
+        var connection:OpaquePointer?,statement:OpaquePointer?
+        guard sqlite3_open_v2(root.appendingPathComponent("memory.sqlite").path,&connection,SQLITE_OPEN_READWRITE|SQLITE_OPEN_FULLMUTEX,nil)==SQLITE_OK else {sqlite3_close(connection);return false}
+        defer {sqlite3_finalize(statement);sqlite3_close(connection)}
+        sqlite3_busy_timeout(connection,0)
+        let sql="INSERT INTO meta VALUES ('capture_decision',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE COALESCE(CAST(json_extract(meta.value,'$.observed_ms') AS REAL),0)<=COALESCE(CAST(json_extract(excluded.value,'$.observed_ms') AS REAL),0)"
+        guard sqlite3_prepare_v2(connection,sql,-1,&statement,nil)==SQLITE_OK else{return false}
+        sqlite3_bind_text(statement,1,json,-1,transient)
+        return sqlite3_step(statement)==SQLITE_DONE && sqlite3_changes(connection)>0
+    }
+
     public func addGap(started: Date, ended: Date?, source: String = "all", reason: String) throws {
         try execute("INSERT INTO coverage VALUES (?,?,?,?,?)", [UUID().uuidString, Self.ms(started), ended.map(Self.ms), source, reason])
     }

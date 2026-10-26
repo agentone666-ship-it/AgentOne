@@ -3,6 +3,7 @@ import AVFoundation
 import Foundation
 import Testing
 import Darwin
+import SQLite3
 
 @MainActor struct RecorderIsolationTests {
     @Test func newUIAdoptsExistingRecorderWithoutRestartOrChangingUserPause() async throws {
@@ -14,6 +15,27 @@ import Darwin
         var snapshot=RecorderSnapshot();snapshot.recording=true;snapshot.saving=true;snapshot.mode="preserve";snapshot.detail="fixture recorder"
         let token=snapshot.session
         try RecorderFiles.write(snapshot,to:RecorderFiles.status(root))
+        let starting=root.appendingPathComponent("fixture-starting")
+        // A real recorder's heartbeat is independent of the UI actor. Keep the
+        // fixture alive even while parallel Vision/AppKit tests occupy MainActor.
+        let recorder=Task.detached(priority:.userInitiated) { [root,token,starting] in
+            var pauseAt:Double?
+            while !Task.isCancelled {
+                do {
+                    let control=try RecorderFiles.read(RecorderControl.self,from:RecorderFiles.control(root))
+                    var value=RecorderSnapshot();value.session=token;value.mode="preserve"
+                    value.recording=control.desired && !FileManager.default.fileExists(atPath:starting.path)
+                    value.saving=value.recording
+                    if !control.desired {
+                        if pauseAt==nil {pauseAt=ProcessInfo.processInfo.systemUptime}
+                        if ProcessInfo.processInfo.systemUptime-(pauseAt ?? 0)>0.1 {value.pauseNonce=control.pauseNonce}
+                    } else {pauseAt=nil}
+                    try RecorderFiles.write(value,to:RecorderFiles.status(root))
+                } catch {}
+                try? await Task.sleep(for:.milliseconds(30))
+            }
+        }
+        defer{recorder.cancel()}
         // An executable that would fail if spawned: a fresh recorder must be adopted.
         let client=AudioCaptureService(database:database,recorderExecutable:URL(fileURLWithPath:"/usr/bin/false"))
         try await client.start(allowPermissionPrompts:false,preserveAllAudio:true)
@@ -22,22 +44,25 @@ import Darwin
         #expect(client.isRecording)
         try client.heartbeat()
         #expect(try RecorderFiles.read(RecorderControl.self,from:RecorderFiles.control(root)).desired)
-        snapshot.recording=false;snapshot.saving=false
-        try RecorderFiles.write(snapshot,to:RecorderFiles.status(root))
-        let acknowledge=Task { @MainActor in
-            try await Task.sleep(for:.milliseconds(50))
-            snapshot.pauseNonce=try RecorderFiles.read(RecorderControl.self,from:RecorderFiles.control(root)).pauseNonce
-            try RecorderFiles.write(snapshot,to:RecorderFiles.status(root))
+        try Data().write(to:starting)
+        for _ in 0..<100 {
+            if try !RecorderFiles.read(RecorderSnapshot.self,from:RecorderFiles.status(root)).recording {break}
+            try await Task.sleep(for:.milliseconds(30))
         }
-        try await client.stop(reason:"user_paused")
-        #expect(try RecorderFiles.read(RecorderSnapshot.self,from:RecorderFiles.status(root)).pauseNonce != nil)
-        try await acknowledge.value
+        try #require(!RecorderFiles.read(RecorderSnapshot.self,from:RecorderFiles.status(root)).recording)
+        let stoppingClient=AudioCaptureService(database:database,recorderExecutable:URL(fileURLWithPath:"/usr/bin/false"))
+        try await stoppingClient.stop(reason:"user_paused")
+        let acknowledgement=try RecorderFiles.read(RecorderSnapshot.self,from:RecorderFiles.status(root)).pauseNonce
+        #expect(acknowledgement != nil)
+        #expect(acknowledgement == (try RecorderFiles.read(RecorderControl.self,from:RecorderFiles.control(root)).pauseNonce))
         #expect(try !RecorderFiles.read(RecorderControl.self,from:RecorderFiles.control(root)).desired)
         // Reopening/polling a paused UI must not silently resume recording.
         let reopened=AudioCaptureService(database:database,recorderExecutable:URL(fileURLWithPath:"/usr/bin/false"))
         try reopened.heartbeat()
         #expect(try !RecorderFiles.read(RecorderControl.self,from:RecorderFiles.control(root)).desired)
+        recorder.cancel();await recorder.value
     }
+
     @Test func controlFilesRejectSymlinksAndUsePrivatePermissions() throws {
         let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer{try? FileManager.default.removeItem(at:root)}
@@ -52,6 +77,30 @@ import Darwin
 }
 
 struct RecorderWatermarkTests {
+    @Test func lockedOptionalModelAuditCannotStopAlreadyOpenPCM() throws {
+        let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer{try? FileManager.default.removeItem(at:root)}
+        let db=try MemoryDatabase(root:root),host=ProcessInfo.processInfo.systemUptime
+        let writer=AudioTrackWriter(database:db,source:"mixed",sessionID:"audit-lock",wallAnchor:Date(),hostAnchor:host)
+        let format=AVAudioFormat(standardFormatWithSampleRate:48000,channels:2)!
+        let block=AVAudioPCMBuffer(pcmFormat:format,frameCapacity:48000)!;block.frameLength=48000
+        for channel in 0..<2 {block.floatChannelData![channel].update(repeating:0.2,count:48000)}
+        try writer.append(block,presentationSeconds:host)
+        var blocker:OpaquePointer?
+        #expect(sqlite3_open(root.appendingPathComponent("memory.sqlite").path,&blocker)==SQLITE_OK)
+        defer{sqlite3_close(blocker)}
+        #expect(sqlite3_exec(blocker,"BEGIN IMMEDIATE",nil,nil,nil)==SQLITE_OK)
+        #expect(!db.tryRecordDecisionAudit("{\"observed_ms\":1}"))
+        try writer.append(block,presentationSeconds:host+1)
+        #expect(sqlite3_exec(blocker,"ROLLBACK",nil,nil,nil)==SQLITE_OK)
+        try writer.finish()
+        let row=try #require(db.rows("SELECT * FROM segments WHERE state='sealed'").first)
+        #expect(abs(Double(row["ended_ms"]!)!-Double(row["started_ms"]!)!-2000)<2)
+        _=try db.verifiedAudioURL(row["id"]!)
+        #expect(db.tryRecordDecisionAudit("{\"observed_ms\":20}"))
+        #expect(!db.tryRecordDecisionAudit("{\"observed_ms\":1}"))
+        #expect(try db.rows("SELECT value FROM meta WHERE key='capture_decision'").first?["value"]=="{\"observed_ms\":20}")
+    }
     @Test func delayedDeviceShutdownSealsOnlyReceivedPCMAndRecordsTheMissingTail() throws {
         let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer{try? FileManager.default.removeItem(at:root)}
@@ -113,16 +162,19 @@ struct RecorderWatermarkTests {
 @MainActor struct RecorderDeadlineTests {
     @Test func missingFrameworkCompletionCannotHoldTheCallerForever() async throws {
         var parked:CheckedContinuation<Void,Never>?
-        let start=Date()
+        var underlyingCompleted=false
         do {
             try await CaptureDeadline.perform(seconds:0.05,message:"fixture timeout") {
                 await withCheckedContinuation {parked=$0}
+                underlyingCompleted=true
             }
             Issue.record("A missing framework completion must time out")
         } catch {#expect(error.localizedDescription=="fixture timeout")}
-        #expect(Date().timeIntervalSince(start)<2)
+        #expect(!underlyingCompleted)
+        #expect(parked != nil)
         parked?.resume()
         try await Task.sleep(for:.milliseconds(30)) // Late completion cannot resume twice.
+        #expect(underlyingCompleted)
     }
     @Test func watchdogNeedsRealDiskProgressAndHonorsManualPause() {
         let policy=RecorderWatchdog(),pid:Int32=42

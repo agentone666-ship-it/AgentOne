@@ -244,12 +244,14 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             do {
                 if preserve {try sink.mixed.annotateActivity(decision,evidence:evidence)}
                 else {try sink.mixed.applyDecision(decision,quietSeconds:evidence.quietSeconds,inputsReady:evidence.inputsReady,soundConfirmed:evidence.sustainedSound)}
-                let state=sink.decisionStatus.snapshot
-                let value:[String:Any]=["effect":preserve ? "annotate_only":"capture_gate","model":"convaiinnovations/laya/multilingual","choice":decision?.choice ?? "unavailable","answer_probability":decision?.confidence ?? 0,"saving":state.saving,"quiet_seconds":evidence.quietSeconds,"inputs_ready":evidence.inputsReady,"sound_confirmed":evidence.sustainedSound,"active_fraction":evidence.activeFraction,"ready_sources":evidence.readySources,"observed_ms":MemoryDatabase.now]
-                let json=String(decoding:try JSONSerialization.data(withJSONObject:value),as:UTF8.self)
-                try sink.database.execute("INSERT INTO meta VALUES ('capture_decision',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[json])
             }
-            catch {sink.onFailure("录音决策切换失败："+error.localizedDescription)}
+            catch {sink.onFailure("录音分段失败："+error.localizedDescription);return}
+            let state=sink.decisionStatus.snapshot,confidence=decision.map {$0.confidence.isFinite ? max(0,min(1,$0.confidence)):0} ?? 0
+            let value:[String:Any]=["effect":preserve ? "annotate_only":"capture_gate","model":"convaiinnovations/laya/multilingual","choice":decision?.choice ?? "unavailable","answer_probability":confidence,"saving":state.saving,"quiet_seconds":evidence.quietSeconds,"inputs_ready":evidence.inputsReady,"sound_confirmed":evidence.sustainedSound,"active_fraction":evidence.activeFraction,"ready_sources":evidence.readySources,"observed_ms":MemoryDatabase.now]
+            if let data=try? JSONSerialization.data(withJSONObject:value) {
+                let json=String(decoding:data,as:UTF8.self),database=sink.database
+                DispatchQueue.global(qos:.utility).async {_=database.tryRecordDecisionAudit(json)}
+            }
         }
     }
 
