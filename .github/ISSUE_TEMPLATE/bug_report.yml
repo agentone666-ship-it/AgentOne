@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible AgentOne problem using synthetic data.
+description: Report a reproducible Thenvia problem using synthetic data.
 title: "[Bug]: "
 labels: [bug]
 body:
@@ -30,4 +30,4 @@ body:
   - type: input
     id: commit
     attributes:
-      label: AgentOne commit
+      label: Thenvia / AgentOne version or commit
