@@ -5,6 +5,16 @@ import Foundation
 import Testing
 
 struct PreservationTests {
+    @Test func missingMicrophoneCallbacksRecoverWithBoundedRetriesAndSilenceIsHealthy() {
+        var policy=MicrophoneRecoveryPolicy(now:0)
+        let retry=[5.0,6,7,12,18,24].map {policy.observe(hasSamples:false,now:$0)}
+        #expect(retry==[false,true,false,true,true,false])
+        let healthy=policy.observe(hasSamples:true,now:25)
+        #expect(!healthy)
+        #expect(policy.attempts==0)
+        let cooldown=policy.observe(hasSamples:false,now:30),again=policy.observe(hasSamples:false,now:31)
+        #expect(!cooldown && again)
+    }
     @Test func modelWaitUnknownAndFailureCannotStopContinuousPCMOrCreateOmittedTime() throws {
         let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer{try? FileManager.default.removeItem(at:root)}

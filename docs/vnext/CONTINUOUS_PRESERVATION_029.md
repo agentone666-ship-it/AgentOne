@@ -17,7 +17,7 @@
 
 ## TESTS
 
-- 135 项 Swift 测试通过，包含模型 wait/nil/NaN 不停录、模型切片前后时间连续、无 automatic_wait 省略、标签不完成宿主任务、来源更正/失败不写旧标签、删除派生内容、低分和无识别语音标记。
+- 136 项 Swift 测试通过，包含模型 wait/nil/NaN 不停录、模型切片前后时间连续、无 automatic_wait 省略、标签不完成宿主任务、来源更正/失败不写旧标签、删除派生内容、低分和无识别语音标记。
 - 21 项通用 MCP 测试通过，覆盖预览标签检索、自动地点来源和来源证据；AAC→SQLite→真实 MCP 子进程 interop、签名 Release ZIP 验证通过。
 - 真机静置至少 4 个连续约 60 秒片段：均 sealed、原文件哈希正确、continuous_preservation、真实 core_location 证据齐全、后台 asr_no_speech 预览生成，automatic_wait 数量为 0；Laya 为 wait/unknown 时仍持续保存。正常退出/重开后状态为 recording，心跳更新，原音继续落盘。
 - 本机缓存 Laya 的活动/主题 JSONL 协议均已真实运行；输入为合成文本，不能证明真实会议分类准确率。合成检索 benchmark 18/18，仍不代表真实 ASR 或会议召回。
@@ -27,3 +27,9 @@
 ## MAIN SYNC
 
 同步 main 的 Thenvia 品牌与开发依赖更新。README 保留 main 的品牌图、双语入口、体验步骤及证据边界，并将默认策略同步为 0.2.9 持续保全；英文 README、使用指南和路线图一起更新，避免旧听候说明误导用户。隔离 worktree 解决冲突，原共享目录的其他未提交文件未改动。
+
+## MICROPHONE HEALTH
+
+最终逐来源检查发现本次运行的 input_frames 只有 system_audio，不能把文件 source=mixed 或连续落盘当成麦克风已接入的证明。系统日志在启动时有音频设备切换，可能导致 AVAudioEngine 停止；尚无证据把之前会议漏录完全归因为这一个原因。[Apple 配置变化说明](https://developer.apple.com/documentation/foundation/nsnotification/name-swift.struct/avaudioengineconfigurationchange) 描述了硬件通道/采样率变化可停止引擎。
+
+增加按实际采样回调检查的恢复策略：缺采样约 6 秒后在主线程重建麦克风引擎，最多连续 3 次；有效采样恢复后重置预算，静音 PCM 也算健康。恢复期间电脑声音持续保存；仍失败时橙色提示，不冒充完整双输入，原有覆盖缺口记录继续保留。回归包含重试边界、冷却和成功重置；新安装后真机 UI 同时显示两路已接入、自动记录中；封口的约 60 秒混合文件中 system_audio 与 microphone 均有实际帧、双声道 AAC 哈希正确、策略为 continuous_preservation。此前仅电脑声音的片段不冒充完整麦克风记录；本次短测仍不能证明全天稳定或真实会议识别质量。
