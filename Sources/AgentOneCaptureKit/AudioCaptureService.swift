@@ -47,12 +47,13 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
     let decisionStatus: RecordingDecisionStatus
     let database: MemoryDatabase
     let onFailure: @Sendable (String) -> Void
+    let onSystemFailure:@Sendable (ObjectIdentifier,String,Int)->Void
     private var timer: DispatchSourceTimer?
     fileprivate var failed = false
-    init(database: MemoryDatabase, metadata: CaptureMetadata, activity: CaptureActivityMeter, decisionStatus: RecordingDecisionStatus, onFailure: @escaping @Sendable (String) -> Void) {
+    init(database: MemoryDatabase, metadata: CaptureMetadata, activity: CaptureActivityMeter, decisionStatus: RecordingDecisionStatus,onSystemFailure:@escaping @Sendable (ObjectIdentifier,String,Int)->Void,onFailure: @escaping @Sendable (String) -> Void) {
         let host = CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()))
         mixed = MixedAudioWriter(database:database,sessionID:UUID().uuidString,wallAnchor:Date(),hostAnchor:host,decisionStatus:decisionStatus,onActivity:{activity.observe($0,source:"mixed")},metadata:{metadata.snapshot()})
-        self.database=database;self.decisionStatus=decisionStatus;self.activity=activity;self.onFailure=onFailure
+        self.database=database;self.decisionStatus=decisionStatus;self.activity=activity;self.onFailure=onFailure;self.onSystemFailure=onSystemFailure
     }
     func beginMixing() {
         queue.async {
@@ -88,7 +89,10 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             } catch {self.failed=true;self.onFailure("麦克风混音失败："+error.localizedDescription)}
         }
     }
-    func stream(_ stream: SCStream, didStopWithError error: Error) { onFailure("系统音频流已中断，请检查设备或系统授权后继续。") }
+    func stream(_ stream:SCStream,didStopWithError error:Error) {
+        let value=error as NSError
+        onSystemFailure(ObjectIdentifier(stream),value.domain,value.code)
+    }
     func finish() async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             queue.async {
@@ -113,7 +117,9 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
     public private(set) var recordingStartedMS:Double=0
     public private(set) var automaticDecisions = true
     public private(set) var preserveAllAudio = false
-    public private(set) var microphoneWarning = ""
+    private var micWarning="",systemWarning=""
+    public var microphoneWarning:String {[systemWarning,micWarning].filter{!$0.isEmpty}.joined(separator:" · ")}
+    public var systemHealthy:Bool {isRecording && systemRecovery==nil && systemWarning.isEmpty && activity.hasSamples(source:"system_audio",maxAge:3)}
     public let metadata = CaptureMetadata()
     public let activity = CaptureActivityMeter()
     public private(set) var decisionStatus = RecordingDecisionStatus()
@@ -124,8 +130,11 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
     private var microphoneInput: MicrophoneInput?
     private var lockFD: Int32 = -1
     private var recordingActivity:NSObjectProtocol?
+    private var systemRecovery:Task<Void,Never>?
     private let sessions = CaptureSessionCoordinator()
     public var onFailure: (@MainActor @Sendable (String) -> Void)?
+    public var onUserStopped:(@MainActor @Sendable ()->Void)?
+    public var onDiagnostic:(@MainActor @Sendable (String)->Void)?
 
     public init(database: MemoryDatabase) { self.database = database }
 
@@ -137,6 +146,7 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
     }
 
     private func startSession(allowPermissionPrompts: Bool,automaticDecisions:Bool,preserveAllAudio:Bool) async throws {
+        guard !needsProcessRestart else {throw CaptureFailure.message("采集组件需要重建")}
         guard !isRecording, stream == nil else { return }
         guard #available(macOS 15, *) else { throw CaptureFailure.message("双路原生录音需要 macOS 15 或更新版本") }
         lockFD = Darwin.open(database.root.appendingPathComponent("capture.lock").path, O_CREAT | O_RDWR, 0o600)
@@ -160,7 +170,7 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
                 discovered=try await SCShareableContent.excludingDesktopWindows(false,onScreenWindowsOnly:true)
             } else {
                 do {try await CaptureDeadline.perform(seconds:15,message:"系统音设备查询未响应，需要重新创建采集器") {discovered=try await SCShareableContent.excludingDesktopWindows(false,onScreenWindowsOnly:true)}}
-                catch {needsProcessRestart=true;throw error}
+                catch {if error is CaptureOperationTimeout {needsProcessRestart=true};throw error}
             }
             guard let content=discovered else {throw CaptureFailure.message("未取得系统音设备")}
             guard let display = content.displays.first else { throw CaptureFailure.message("没有可用显示器，无法启动系统音采集") }
@@ -168,7 +178,16 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             self.automaticDecisions=automaticDecisions && !preserveAllAudio;self.preserveAllAudio=preserveAllAudio
             activity.reset();decisionStatus=RecordingDecisionStatus(manual:!automaticDecisions && !preserveAllAudio,preserveAllAudio:preserveAllAudio);sessionToken=UUID()
             let activeSession=sessionToken
-            let output = AudioStreamSink(database: database, metadata: metadata, activity: activity, decisionStatus:decisionStatus) { [weak self] message in
+            let output = AudioStreamSink(database: database, metadata: metadata, activity: activity, decisionStatus:decisionStatus,onSystemFailure:{ [weak self] id,domain,code in
+                Task { @MainActor in
+                    guard let self,self.sessionToken==activeSession,self.stream.map(ObjectIdentifier.init)==id else{return}
+                    self.systemWarning="系统音中断（\(domain.prefix(80)) \(code)）；Mac 麦克风继续保存"
+                    self.onDiagnostic?(self.systemWarning)
+                    if SystemStreamStopPolicy.isUserStop(domain:domain,code:code) {self.onUserStopped?();return}
+                    guard self.isRecording else{return}
+                    if self.systemRecovery != nil {self.stream=nil} else {self.requestSystemReconnect()}
+                }
+            }) { [weak self] message in
                 Task { @MainActor in guard let self,self.isRecording,self.sessionToken==activeSession else {return};self.onFailure?(message) }
             }
             let configuration = SCStreamConfiguration()
@@ -185,15 +204,19 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             sink = output; stream = capture
             output.beginMixing()
             do {try await CaptureDeadline.perform(seconds:15,message:"系统音启动未响应，需要重新创建采集器") {try await capture.startCapture()}}
-            catch {needsProcessRestart=true;throw error}
-            microphoneWarning=""
+            catch {
+                let value=error as NSError
+                if SystemStreamStopPolicy.isUserStop(domain:value.domain,code:value.code) {onUserStopped?()}
+                if error is CaptureOperationTimeout {needsProcessRestart=true};throw error
+            }
+            micWarning="";systemWarning=""
             let microphoneSession=sessionToken
             let microphone = MicrophoneInput(deliver: { buffer,pts in output.enqueueMicrophone(buffer,presentationSeconds: pts) },fail: { [weak self] message in
                 Task { @MainActor in guard let self,self.isRecording,self.sessionToken==activeSession else {return};self.onFailure?(message) }
             },hasSamples:{output.activity.hasSamples(source:"microphone",maxAge:3)},warning:{ [weak self] message in
                 Task { @MainActor in
                     guard let self,self.isRecording,self.sessionToken==microphoneSession else {return}
-                    self.microphoneWarning=message
+                    self.micWarning=message
                 }
             })
             microphoneInput = microphone
@@ -221,6 +244,7 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
 
     private func performStop(reason: String) async throws {
         let wasRecording = isRecording
+        if systemRecovery != nil {systemRecovery?.cancel();systemRecovery=nil;needsProcessRestart=true}
         activity.reset()
         microphoneInput?.stop(); microphoneInput = nil
         isRecording = false
@@ -257,6 +281,7 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
 
     public func heartbeat() throws {
         guard isRecording else { return }
+        if systemRecovery==nil,Date().timeIntervalSince1970*1000-recordingStartedMS>10_000,!activity.hasSamples(source:"system_audio",maxAge:6) {requestSystemReconnect()}
         let state=decisionStatus.snapshot
         try database.setCaptureState(state.saving ? "recording" : "listening", detail: state.detail+(microphoneWarning.isEmpty ? "":" · "+microphoneWarning))
     }
@@ -274,6 +299,60 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
     }
     private func stopStream(_ stream:SCStream) async {
         do {try await CaptureDeadline.perform(seconds:3,message:"系统音停止未响应，需要重新创建采集器") {try await stream.stopCapture()}}
-        catch {needsProcessRestart=true}
+        catch {if error is CaptureOperationTimeout {needsProcessRestart=true}}
     }
+    /// A failed system stream must not close the healthy microphone or reset
+    /// the mixed writer's clock/journal while it reconnects.
+    public func requestSystemReconnect() {
+        guard #available(macOS 15,*) else{return}
+        guard isRecording,systemRecovery==nil,let output=sink else{return}
+        let token=sessionToken,old=stream
+        stream=nil;systemWarning="正在恢复系统声音；Mac 麦克风继续保存"
+        systemRecovery=Task { @MainActor [weak self] in
+            guard let self else{return}
+            defer {if self.sessionToken==token {self.systemRecovery=nil}}
+            if let old {try? await CaptureDeadline.perform(seconds:3,message:"旧系统音未响应") {try await old.stopCapture()}}
+            var attempts=0
+            while self.isRecording,self.sessionToken==token,!Task.isCancelled {
+                var candidate:SCStream?
+                do {
+                    guard CGPreflightScreenCaptureAccess() else {throw CaptureFailure.message("系统音权限不可用，请在系统设置中恢复；Mac 麦克风继续保存")}
+                    var content:SCShareableContent?
+                    try await CaptureDeadline.perform(seconds:15,message:"系统音设备查询未响应") {content=try await SCShareableContent.excludingDesktopWindows(false,onScreenWindowsOnly:true)}
+                    guard self.isRecording,self.sessionToken==token,!Task.isCancelled else{return}
+                    guard let display=content?.displays.first else {throw CaptureFailure.message("系统音显示源暂不可用；Mac 麦克风继续保存")}
+                    let config=SCStreamConfiguration();config.width=2;config.height=2;config.minimumFrameInterval=CMTime(seconds:1,preferredTimescale:1);config.showsCursor=false;config.capturesAudio=true;config.captureMicrophone=false;config.excludesCurrentProcessAudio=true;config.sampleRate=48_000;config.channelCount=2
+                    let capture=SCStream(filter:SCContentFilter(display:display,excludingApplications:[],exceptingWindows:[]),configuration:config,delegate:output)
+                    candidate=capture
+                    self.stream=capture
+                    try capture.addStreamOutput(output,type:.audio,sampleHandlerQueue:output.inputQueue)
+                    try capture.addStreamOutput(output,type:.screen,sampleHandlerQueue:output.inputQueue)
+                    let started=ProcessInfo.processInfo.systemUptime
+                    try await CaptureDeadline.perform(seconds:15,message:"系统音重连未响应") {try await capture.startCapture()}
+                    guard self.isRecording,self.sessionToken==token,!Task.isCancelled else {try? await CaptureDeadline.perform(seconds:3,message:"取消系统音重连") {try await capture.stopCapture()};return}
+                    self.stream=capture
+                    for _ in 0..<30 {
+                        if self.stream !== capture || (self.activity.telemetry()["system_audio"]?.observedUptime ?? 0)>started {break}
+                        try await Task.sleep(for:.milliseconds(100))
+                    }
+                    guard self.stream === capture,(self.activity.telemetry()["system_audio"]?.observedUptime ?? 0)>started else {throw CaptureFailure.message("系统音重连后未收到真实采样")}
+                    self.systemWarning="";self.onDiagnostic?("系统音已恢复；Mac 麦克风和混音会话保持连续");return
+                } catch {
+                    let value=error as NSError
+                    if SystemStreamStopPolicy.isUserStop(domain:value.domain,code:value.code) {self.onUserStopped?();return}
+                    if self.sessionToken==token {self.stream=nil;self.systemWarning="系统音恢复中："+error.localizedDescription}
+                    if let candidate {try? await CaptureDeadline.perform(seconds:3,message:"清理失败系统音") {try await candidate.stopCapture()}}
+                    attempts+=1
+                    do {try await Task.sleep(for:.seconds(min(30,pow(2,Double(min(attempts-1,5))))))} catch{return}
+                }
+            }
+        }
+    }
+
+}
+
+
+enum SystemStreamStopPolicy {
+    // SCError.h: -3817 is explicit user stop; -3821 is a system interruption.
+    static func isUserStop(domain:String,code:Int)->Bool {domain=="com.apple.ScreenCaptureKit.SCStreamErrorDomain" && code == -3817}
 }

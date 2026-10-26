@@ -16,6 +16,9 @@ import Darwin
     private var healthySince:Date?
     private var decisionNonce:String?,sealNonce:String?
     private var pauseNonce:String?
+    private var reconnectRequested:String?,reconnectNonce:String?,userStopNonce:String?
+    private var userStopRequested=false
+    private let diagnosticQueue=DispatchQueue(label:"life.agentone.recorder-diagnostics",qos:.utility)
     public init(root:URL) throws {database=try MemoryDatabase(root:root);service=NativeAudioCaptureService(database:database)}
     public func run() async throws {
         let fd=Darwin.open(database.root.appendingPathComponent("recorder-worker.lock").path,O_CREAT|O_RDWR,0o600)
@@ -23,6 +26,8 @@ import Darwin
         guard Darwin.lockf(fd,F_TLOCK,0)==0 else {Darwin.close(fd);return}
         defer {Darwin.close(fd)}
         service.onFailure={ [weak self] message in self?.failure=message;self?.log("capture_failure",detail:message) }
+        service.onUserStopped={ [weak self] in self?.userStopRequested=true }
+        service.onDiagnostic={ [weak self] message in self?.log("system_stream_status",detail:message) }
         let center=NSWorkspace.shared.notificationCenter
         observers.append(center.addObserver(forName:NSWorkspace.willSleepNotification,object:nil,queue:.main) { [weak self] _ in Task {@MainActor in self?.sleeping=true}})
         observers.append(center.addObserver(forName:NSWorkspace.didWakeNotification,object:nil,queue:.main) { [weak self] _ in Task {@MainActor in self?.sleeping=false}})
@@ -31,7 +36,18 @@ import Darwin
         try publish(mode:"preserve")
         while !Task.isCancelled {
             do {
-                if let control=try? RecorderFiles.read(RecorderControl.self,from:RecorderFiles.control(database.root)),["preserve","intelligent","manual"].contains(control.mode) {
+                if var control=try? RecorderFiles.read(RecorderControl.self,from:RecorderFiles.control(database.root)),["preserve","intelligent","manual"].contains(control.mode) {
+                    if userStopRequested {
+                        userStopRequested=false;let nonce=UUID().uuidString;userStopNonce=nonce
+                        control.desired=false;control.pauseNonce=nonce;control.systemUserStopNonce=nonce
+                        try RecorderFiles.write(control,to:RecorderFiles.control(database.root))
+                        UserDefaults(suiteName:"life.agentone.desktop")?.set(false,forKey:"vNext.captureDesired")
+                        log("system_user_stopped",detail:"explicit_user_stop")
+                    }
+                    if let nonce=control.systemUserStopNonce {
+                        userStopNonce=nonce
+                        if control.desired {control.desired=false;try RecorderFiles.write(control,to:RecorderFiles.control(database.root))}
+                    }
                     let suspended=sleeping || (locked && control.pauseOnLock)
                     if let failure {
                         self.failure=nil;error=failure;healthySince=nil;try await service.stop(reason:"stream_error")
@@ -43,6 +59,7 @@ import Darwin
                         if !control.desired {pauseNonce=control.pauseNonce}
                         error="";attempts=0
                     } else if Date()>=retryAfter {
+                        userStopNonce=nil
                         if Date().timeIntervalSince1970*1000-control.updatedMS<600000 {service.metadata.restore(place:control.place,context:control.context)}
                         else {service.metadata.update(place:nil,application:nil,bundleID:nil)}
                         let wasRecording=service.isRecording
@@ -58,6 +75,8 @@ import Darwin
                     }
                     if control.decisionNonce != decisionNonce,let session=control.decisionSession {decisionNonce=control.decisionNonce;service.applyDecision(control.decision,session:session)}
                     if let nonce=control.sealNonce,nonce != sealNonce,service.isRecording {try await service.checkpoint();sealNonce=nonce}
+                    if let nonce=control.reconnectNonce,nonce != reconnectRequested,service.isRecording {reconnectRequested=nonce;service.requestSystemReconnect();log("system_reconnect_requested",detail:nonce)}
+                    if reconnectRequested != reconnectNonce,service.systemHealthy {reconnectNonce=reconnectRequested;log("system_reconnected",detail:"microphone_and_mix_session_preserved")}
                     if service.isRecording,service.activity.hasSamples(source:"system_audio",maxAge:3),service.activity.hasSamples(source:"microphone",maxAge:3) {
                         if healthySince==nil {healthySince=Date()}
                         if Date().timeIntervalSince(healthySince!)>10 {attempts=0}
@@ -77,6 +96,7 @@ import Darwin
         value.recordingStartedMS=service.recordingStartedMS
         value.waitingForUserPermission=waitingForPermission
         value.pauseNonce=pauseNonce
+        value.reconnectNonce=reconnectNonce;value.userStopNonce=userStopNonce
         value.detail=service.isRecording ? service.decisionStatus.snapshot.detail:error.isEmpty ? "后台采集已暂停":error
         value.warning=error.isEmpty ? service.microphoneWarning:error
         if service.isRecording,value.warning.isEmpty {
@@ -89,7 +109,11 @@ import Darwin
         let url=database.root.appendingPathComponent("recorder-events.jsonl")
         let row:[String:Any]=["at":Date().timeIntervalSince1970*1000,"pid":getpid(),"event":event,"detail":detail]
         guard var data=try? JSONSerialization.data(withJSONObject:row) else {return};data.append(10)
-        if !FileManager.default.fileExists(atPath:url.path) {FileManager.default.createFile(atPath:url.path,contents:nil,attributes:[.posixPermissions:0o600])}
-        if let file=try? FileHandle(forWritingTo:url) {defer{try? file.close()};try? file.seekToEnd();try? file.write(contentsOf:data);try? file.synchronize()}
+        let payload=data
+        diagnosticQueue.async {
+            let fd=Darwin.open(url.path,O_CREAT|O_APPEND|O_WRONLY|O_CLOEXEC|O_NOFOLLOW,0o600)
+            guard fd>=0 else{return};defer{Darwin.close(fd)}
+            payload.withUnsafeBytes {if let base=$0.baseAddress {_=Darwin.write(fd,base,$0.count)}}
+        }
     }
 }

@@ -18,6 +18,13 @@ struct RecorderWatchdog {
 /// Separate process: a suspended framework continuation must not suspend its
 /// own watchdog. Monitors both control-loop liveness and actual PCM disk progress.
 public enum RecorderSupervisor {
+    public static func requestSystemReconnect(root:URL) throws {
+        var control=try RecorderFiles.read(RecorderControl.self,from:RecorderFiles.control(root))
+        guard control.desired else {throw CaptureFailure.message("录音已暂停，不执行系统音重连")}
+        let nonce=UUID().uuidString;control.reconnectNonce=nonce
+        try RecorderFiles.write(control,to:RecorderFiles.control(root))
+        print("{\"requested\":true,\"nonce\":\"\(nonce)\"}")
+    }
     public static func run(root:URL,executable:URL,fixture:Bool=false,fixturePause:Bool=false) async throws {
         if fixture {
             guard (try FileManager.default.contentsOfDirectory(atPath:root.path)).isEmpty else {throw CaptureFailure.message("监督测试必须使用空目录")}

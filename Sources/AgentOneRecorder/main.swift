@@ -17,6 +17,9 @@ import Darwin
         }
         guard let index=CommandLine.arguments.firstIndex(of:"--root"),index+1<CommandLine.arguments.count else {return}
         let root=URL(fileURLWithPath:CommandLine.arguments[index+1])
+        if CommandLine.arguments.contains("--request-system-reconnect") {
+            try RecorderSupervisor.requestSystemReconnect(root:root);return
+        }
         if CommandLine.arguments.contains("--supervisor-self-check") || CommandLine.arguments.contains("--supervisor-pause-self-check") {
             try await RecorderSupervisor.run(root:root,executable:URL(fileURLWithPath:CommandLine.arguments[0]),fixture:true,fixturePause:CommandLine.arguments.contains("--supervisor-pause-self-check"));return
         }

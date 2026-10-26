@@ -6,6 +6,25 @@ import Darwin
 import SQLite3
 
 @MainActor struct RecorderIsolationTests {
+    @Test func persistedSystemStopWinsEvenWhenTheWorkerSnapshotWasRecreated() throws {
+        let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer{try? FileManager.default.removeItem(at:root)}
+        let defaults=UserDefaults.standard,previous=UserDefaults.standard.object(forKey:"vNext.captureDesired")
+        defer {if let previous {defaults.set(previous,forKey:"vNext.captureDesired")} else {defaults.removeObject(forKey:"vNext.captureDesired")}}
+        let db=try MemoryDatabase(root:root)
+        var control=RecorderControl();control.desired=true
+        try RecorderFiles.write(control,to:RecorderFiles.control(root))
+        var snapshot=RecorderSnapshot();snapshot.recording=true;snapshot.saving=true
+        try RecorderFiles.write(snapshot,to:RecorderFiles.status(root))
+        let client=AudioCaptureService(database:db,recorderExecutable:URL(fileURLWithPath:"/usr/bin/false"))
+        control.desired=false;control.systemUserStopNonce="system-stop";control.pauseNonce="system-stop"
+        try RecorderFiles.write(control,to:RecorderFiles.control(root))
+        snapshot.recording=false;snapshot.userStopNonce=nil // New worker has not echoed the stop yet.
+        try RecorderFiles.write(snapshot,to:RecorderFiles.status(root))
+        try client.heartbeat()
+        #expect(try !RecorderFiles.read(RecorderControl.self,from:RecorderFiles.control(root)).desired)
+        #expect(client.externalPauseRequested)
+    }
     @Test func newUIAdoptsExistingRecorderWithoutRestartOrChangingUserPause() async throws {
         let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer{try? FileManager.default.removeItem(at:root)}
@@ -160,6 +179,12 @@ struct RecorderWatermarkTests {
 }
 
 @MainActor struct RecorderDeadlineTests {
+    @Test func systemStopPolicyDistinguishesUserIntentFromDeviceRecovery() {
+        #expect(SystemStreamStopPolicy.isUserStop(domain:"com.apple.ScreenCaptureKit.SCStreamErrorDomain",code:-3817))
+        #expect(!SystemStreamStopPolicy.isUserStop(domain:"com.apple.ScreenCaptureKit.SCStreamErrorDomain",code:-3821))
+        #expect(!SystemStreamStopPolicy.isUserStop(domain:"com.apple.ScreenCaptureKit.SCStreamErrorDomain",code:-3808))
+        #expect(!SystemStreamStopPolicy.isUserStop(domain:"unrelated",code:-3817))
+    }
     @Test func missingFrameworkCompletionCannotHoldTheCallerForever() async throws {
         var parked:CheckedContinuation<Void,Never>?
         var underlyingCompleted=false
@@ -169,7 +194,7 @@ struct RecorderWatermarkTests {
                 underlyingCompleted=true
             }
             Issue.record("A missing framework completion must time out")
-        } catch {#expect(error.localizedDescription=="fixture timeout")}
+        } catch {#expect(error is CaptureOperationTimeout);#expect(error.localizedDescription=="fixture timeout")}
         #expect(!underlyingCompleted)
         #expect(parked != nil)
         parked?.resume()

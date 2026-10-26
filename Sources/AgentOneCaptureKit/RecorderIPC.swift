@@ -14,6 +14,8 @@ struct RecorderControl:Codable {
     var decisionSession:UUID?
     var sealNonce:String?
     var pauseNonce:String?
+    var reconnectNonce:String?
+    var systemUserStopNonce:String?
 }
 struct RecorderAudioPulse:Codable {
     var pid=Int32(getpid())
@@ -35,6 +37,8 @@ struct RecorderSnapshot:Codable {
     var recordingStartedMS:Double?
     var waitingForUserPermission:Bool?
     var pauseNonce:String?
+    var reconnectNonce:String?
+    var userStopNonce:String?
 }
 enum RecorderFiles {
     static func control(_ root:URL)->URL {root.appendingPathComponent("recorder-control.json")}
@@ -62,6 +66,8 @@ enum RecorderFiles {
     private var loadedAt=Date.distantPast
     private var spawnedAt=Date.distantPast
     private var child:Process?
+    private var seenUserStopNonce:String?
+    private var localSystemPause=false
     private let executable:URL?
     public let metadata=CaptureMetadata()
     private let remoteActivity=CaptureActivityMeter()
@@ -75,6 +81,7 @@ enum RecorderFiles {
     public var microphoneWarning:String {if let native{return native.microphoneWarning};reload();return fresh ? current.warning:"后台采集状态暂不可用，正在检查恢复"}
     public var decisionStatus:RecordingDecisionStatus {if let native{return native.decisionStatus};reload();return remoteDecision}
     public var sessionToken:UUID {if let native{return native.sessionToken};reload();return current.session}
+    public var externalPauseRequested:Bool {if native != nil {return localSystemPause};reload();return control.systemUserStopNonce != nil && !control.desired}
     private var fresh:Bool {current.pid>1 && Darwin.kill(current.pid,0)==0 && Date().timeIntervalSince1970*1000-current.heartbeatMS<5000}
     public init(database:MemoryDatabase,recorderExecutable:URL? = nil) {
         self.database=database
@@ -83,22 +90,38 @@ enum RecorderFiles {
         native=executable==nil ? NativeAudioCaptureService(database:database):nil
         if let saved=try? RecorderFiles.read(RecorderControl.self,from:RecorderFiles.control(database.root)) {control=saved}
         native?.onFailure={ [weak self] in self?.onFailure?($0)}
+        native?.onUserStopped={ [weak self] in
+            guard let self else{return};self.localSystemPause=true
+            Task {try? await self.native?.stop(reason:"system_user_stopped")}
+        }
         reload()
     }
     private func reload() {
         guard native==nil,Date().timeIntervalSince(loadedAt)>0.07 else {return};loadedAt=Date()
+        applyExternalStopSignal()
         guard let value=try? RecorderFiles.read(RecorderSnapshot.self,from:RecorderFiles.status(database.root)) else {current.heartbeatMS=0;return}
         if value.session != current.session {activity.reset()}
         current=value
+        if let nonce=value.userStopNonce,nonce != seenUserStopNonce {
+            seenUserStopNonce=nonce;control.desired=false;control.systemUserStopNonce=nonce
+            UserDefaults.standard.set(false,forKey:"vNext.captureDesired")
+        }
         for (source,value) in value.inputs {activity.observe(AudioActivityReading(rmsDBFS:value.rmsDBFS),source:source,now:value.observedUptime)}
         remoteDecision=RecordingDecisionStatus(manual:value.mode=="manual",preserveAllAudio:value.mode=="preserve")
         remoteDecision.update(saving:value.saving,detail:value.detail)
     }
     private func publish() throws {
+        applyExternalStopSignal()
         let value=metadata.snapshot();control.place=value.0;control.context=value.1
         control.pauseOnLock=(UserDefaults.standard.object(forKey:"vNext.pauseOnLock") as? Bool) ?? true
         control.updatedMS=Date().timeIntervalSince1970*1000
         try RecorderFiles.write(control,to:RecorderFiles.control(database.root))
+    }
+    private func applyExternalStopSignal() {
+        if let saved=try? RecorderFiles.read(RecorderControl.self,from:RecorderFiles.control(database.root)),let nonce=saved.systemUserStopNonce,nonce != seenUserStopNonce {
+            seenUserStopNonce=nonce;control.desired=false;control.systemUserStopNonce=nonce;control.pauseNonce=saved.pauseNonce
+            UserDefaults.standard.set(false,forKey:"vNext.captureDesired")
+        }
     }
     private func ensureWorker() throws {
         reload();guard !fresh,Date().timeIntervalSince(spawnedAt)>3,let executable else {return}
@@ -107,12 +130,13 @@ enum RecorderFiles {
         try process.run();child=process;spawnedAt=Date()
     }
     public func start(allowPermissionPrompts:Bool,automaticDecisions:Bool=true,preserveAllAudio:Bool=false) async throws {
-        if let native {native.metadata.restore(place:metadata.snapshot().0,context:metadata.snapshot().1);try await native.start(allowPermissionPrompts:allowPermissionPrompts,automaticDecisions:automaticDecisions,preserveAllAudio:preserveAllAudio);return}
+        if let native {localSystemPause=false;native.metadata.restore(place:metadata.snapshot().0,context:metadata.snapshot().1);try await native.start(allowPermissionPrompts:allowPermissionPrompts,automaticDecisions:automaticDecisions,preserveAllAudio:preserveAllAudio);return}
+        reload();seenUserStopNonce=control.systemUserStopNonce;control.systemUserStopNonce=nil
         control.desired=true;control.mode=preserveAllAudio ? "preserve":automaticDecisions ? "intelligent":"manual";control.allowPermissionPrompts=allowPermissionPrompts
         try publish();try ensureWorker()
         let until=Date().addingTimeInterval(40)
         while Date()<until {
-            reload();if fresh,current.recording,current.mode==control.mode,current.warning.isEmpty {return}
+            reload();if !control.desired {throw CaptureFailure.message("录音已通过系统停止")};if fresh,current.recording,current.mode==control.mode,current.warning.isEmpty {return}
             try await Task.sleep(for:.milliseconds(150));try ensureWorker()
         }
         throw CaptureFailure.message("后台采集启动尚未就绪；将继续恢复，请检查录音状态")

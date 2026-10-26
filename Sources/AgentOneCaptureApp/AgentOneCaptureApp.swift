@@ -122,6 +122,11 @@ import SwiftUI
         metering=Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else {return}
+                if !self.busy,self.service?.externalPauseRequested==true,self.desiredRecording {
+                    self.desiredRecording=false;UserDefaults.standard.set(false,forKey:"vNext.captureDesired")
+                    self.hasError=false
+                    self.message="已通过系统停止录音；点击恢复才会继续"
+                }
                 let active=self.service?.isRecording == true
                 if self.listening != active {self.listening=active}
                 let saving=active && (self.service?.decisionStatus.snapshot.saving ?? false)
@@ -237,6 +242,7 @@ import SwiftUI
 
     private func resumeAfterSuspension(reason: String) async {
         if reason == "sleep" { sleeping = false } else { locked = false }
+        if service?.externalPauseRequested==true {desiredRecording=false;return}
         if desiredRecording && !suspended { await start(prompts: false) }
     }
 

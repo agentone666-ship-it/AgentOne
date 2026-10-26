@@ -1,5 +1,10 @@
 import Foundation
 
+struct CaptureOperationTimeout:LocalizedError {
+    let message:String
+    var errorDescription:String? {message}
+}
+
 /// Framework continuations can fail to complete. A task-group timeout would
 /// still wait for a noncooperative child; this race resumes the caller once.
 @MainActor enum CaptureDeadline {
@@ -17,7 +22,7 @@ import Foundation
             Task { @MainActor in
                 do {try await Task.sleep(for:.seconds(seconds))} catch {return}
                 guard reply.continuation != nil else {return}
-                reply.finish(.failure(CaptureFailure.message(message)));task.cancel()
+                reply.finish(.failure(CaptureOperationTimeout(message:message)));task.cancel()
             }
         }
     }
