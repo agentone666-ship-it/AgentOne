@@ -13,7 +13,11 @@ public final class RecordingDecisionStatus: @unchecked Sendable {
     private var saving=false
     private var detail="自动听候 · 等待持续声音"
     public let manual:Bool
-    public init(manual:Bool=false) {self.manual=manual;saving=manual;if manual {detail="手动持续录音"}}
+    public let preserveAllAudio:Bool
+    public init(manual:Bool=false,preserveAllAudio:Bool=false) {
+        self.manual=manual;self.preserveAllAudio=preserveAllAudio;saving=manual || preserveAllAudio
+        if preserveAllAudio {detail="持续保全中 · 模型只做标记"} else if manual {detail="手动持续录音"}
+    }
     public var snapshot: (saving:Bool,detail:String) {lock.lock();defer{lock.unlock()};return(saving,detail)}
     func update(saving:Bool,detail:String) {lock.lock();defer{lock.unlock()};self.saving=saving;self.detail=detail}
 }
@@ -48,6 +52,7 @@ final class RecordingGate {
         }
     }
     func apply(_ decision:RecordingDecision?,quietSeconds:Double,inputsReady:Bool,soundConfirmed:Bool,now:Double) throws {
+        if status.preserveAllAudio {status.update(saving:true,detail:status.snapshot.detail);return}
         let probability=decision?.confidence ?? .nan
         let valid=probability.isFinite && (0...1).contains(probability)
         let positive=valid && decision?.choice=="record" && probability>=0.75

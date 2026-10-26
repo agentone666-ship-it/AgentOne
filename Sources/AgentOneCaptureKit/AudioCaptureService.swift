@@ -91,6 +91,7 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
 @MainActor public final class AudioCaptureService {
     public private(set) var isRecording = false
     public private(set) var automaticDecisions = true
+    public private(set) var preserveAllAudio = false
     public let metadata = CaptureMetadata()
     public let activity = CaptureActivityMeter()
     public private(set) var decisionStatus = RecordingDecisionStatus()
@@ -105,7 +106,7 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
 
     public init(database: MemoryDatabase) { self.database = database }
 
-    public func start(allowPermissionPrompts: Bool,automaticDecisions:Bool=true) async throws {
+    public func start(allowPermissionPrompts: Bool,automaticDecisions:Bool=true,preserveAllAudio:Bool=false) async throws {
         if let stoppingTask { try await stoppingTask.value }
         guard !isRecording, stream == nil else { return }
         guard #available(macOS 15, *) else { throw CaptureFailure.message("双路原生录音需要 macOS 15 或更新版本") }
@@ -126,8 +127,8 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
             guard let display = content.displays.first else { throw CaptureFailure.message("没有可用显示器，无法启动系统音采集") }
             try database.recoverInterruptedSegments()
-            self.automaticDecisions=automaticDecisions
-            activity.reset();decisionStatus=RecordingDecisionStatus(manual:!automaticDecisions);sessionToken=UUID()
+            self.automaticDecisions=automaticDecisions && !preserveAllAudio;self.preserveAllAudio=preserveAllAudio
+            activity.reset();decisionStatus=RecordingDecisionStatus(manual:!automaticDecisions && !preserveAllAudio,preserveAllAudio:preserveAllAudio);sessionToken=UUID()
             let output = AudioStreamSink(database: database, metadata: metadata, activity: activity, decisionStatus:decisionStatus) { [weak self] message in
                 Task { @MainActor in self?.onFailure?(message) }
             }
@@ -154,7 +155,7 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             guard !failed,sink === output else {throw CaptureFailure.message("音频在启动期间中断，请重试")}
             try database.execute("UPDATE coverage SET ended_ms=? WHERE ended_ms IS NULL", [MemoryDatabase.now])
             isRecording = true
-            try database.setCaptureState(automaticDecisions ? "listening":"recording", detail:decisionStatus.snapshot.detail)
+            try database.setCaptureState(self.automaticDecisions ? "listening":"recording", detail:decisionStatus.snapshot.detail)
         } catch {
             isRecording = false
             microphoneInput?.stop(); microphoneInput = nil
@@ -192,14 +193,15 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
     }
 
     public func applyDecision(_ decision:RecordingDecision?,session:UUID) {
-        guard isRecording,automaticDecisions,session==sessionToken,let sink else {return}
-        let evidence=activity.startEvidence()
+        guard isRecording,(automaticDecisions || preserveAllAudio),session==sessionToken,let sink else {return}
+        let evidence=activity.startEvidence(),preserve=preserveAllAudio
         sink.queue.async {
             guard !sink.failed else {return}
             do {
-                try sink.mixed.applyDecision(decision,quietSeconds:evidence.quietSeconds,inputsReady:evidence.inputsReady,soundConfirmed:evidence.sustainedSound)
+                if preserve {try sink.mixed.annotateActivity(decision,evidence:evidence)}
+                else {try sink.mixed.applyDecision(decision,quietSeconds:evidence.quietSeconds,inputsReady:evidence.inputsReady,soundConfirmed:evidence.sustainedSound)}
                 let state=sink.decisionStatus.snapshot
-                let value:[String:Any]=["model":"convaiinnovations/laya/multilingual","choice":decision?.choice ?? "unavailable","answer_probability":decision?.confidence ?? 0,"saving":state.saving,"quiet_seconds":evidence.quietSeconds,"inputs_ready":evidence.inputsReady,"sound_confirmed":evidence.sustainedSound,"active_fraction":evidence.activeFraction,"ready_sources":evidence.readySources,"observed_ms":MemoryDatabase.now]
+                let value:[String:Any]=["effect":preserve ? "annotate_only":"capture_gate","model":"convaiinnovations/laya/multilingual","choice":decision?.choice ?? "unavailable","answer_probability":decision?.confidence ?? 0,"saving":state.saving,"quiet_seconds":evidence.quietSeconds,"inputs_ready":evidence.inputsReady,"sound_confirmed":evidence.sustainedSound,"active_fraction":evidence.activeFraction,"ready_sources":evidence.readySources,"observed_ms":MemoryDatabase.now]
                 let json=String(decoding:try JSONSerialization.data(withJSONObject:value),as:UTF8.self)
                 try sink.database.execute("INSERT INTO meta VALUES ('capture_decision',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[json])
             }

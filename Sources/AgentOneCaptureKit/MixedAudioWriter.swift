@@ -26,6 +26,25 @@ public final class MixedAudioWriter: @unchecked Sendable {
     private var latest: Int64 = 0
     private var written = false
     private var closed = false
+    private var activityLabel="unknown"
+    private var activityCandidate="unknown"
+    private var activityVotes=0
+    private var lastModelBoundary:Double?
+    private var modelActivity:[String:Any]=[:]
+    /// A cut only seals a file; the next PCM buffer is always written with its original timestamp.
+    public func annotateActivity(_ decision:RecordingDecision?,evidence:CaptureStartEvidence) throws {
+        guard !closed,decisionStatus?.preserveAllAudio==true else {return}
+        let valid=decision.map {$0.confidence.isFinite && $0.confidence>=0.75 && $0.confidence<=1} ?? false
+        let label = !evidence.inputsReady || !valid ? "unknown" : evidence.sustainedSound && decision?.choice=="record" ? "sound" : !evidence.sustainedSound && decision?.choice=="wait" ? "quiet":"uncertain"
+        let position=host+Double(cursor ?? 0)/Self.sampleRate
+        modelActivity=["label":label,"model":"laya-multilingual","confidence":valid ? decision!.confidence:0,"observed_at":ISO8601DateFormatter().string(from:wall.addingTimeInterval(position-host)),"scope":"last_activity_observation_not_segment_summary"]
+        if label==activityCandidate {activityVotes+=1} else {activityCandidate=label;activityVotes=1}
+        if valid,label != "unknown",activityVotes>=2,label != activityLabel {
+            if activityLabel != "unknown",position-(lastModelBoundary ?? host)>=15 {try writer.finish();lastModelBoundary=position}
+            activityLabel=label
+        }
+        decisionStatus?.update(saving:true,detail:label=="sound" ? "持续保全中 · Laya 标记有声活动":label=="quiet" ? "持续保全中 · Laya 标记安静片段":"持续保全中 · 模型标记待确认")
+    }
     private var lateFrames: [String:Int64] = [:]
     private var missingStarts: [String:Int64] = [:]
     private var sourceFrames: [String:Int64] = [:]
@@ -38,7 +57,7 @@ public final class MixedAudioWriter: @unchecked Sendable {
         seal:{[unowned self] in try self.writer.finish()},
         gap:{[unowned self] start,end in try self.database.addGap(started:self.wall.addingTimeInterval(start-self.host),ended:self.wall.addingTimeInterval(end-self.host),source:"mixed",reason:"automatic_wait")}) }
     public func applyDecision(_ decision:RecordingDecision?,quietSeconds:Double,inputsReady:Bool,soundConfirmed:Bool) throws {
-        guard !closed else {return}
+        guard !closed,decisionStatus?.preserveAllAudio != true else {return}
         // The last emitted output is behind the device clock by the jitter buffer.
         try gate?.apply(decision,quietSeconds:quietSeconds,inputsReady:inputsReady,soundConfirmed:soundConfirmed,now:host+Double(cursor ?? 0)/Self.sampleRate)
     }
@@ -164,7 +183,7 @@ public final class MixedAudioWriter: @unchecked Sendable {
         try database.addGap(started:wall.addingTimeInterval(Double(start)/Self.sampleRate),ended:wall.addingTimeInterval(Double(end)/Self.sampleRate),source:source,reason:"mixed_input_no_samples")
     }
     private func mixingContext() -> String {
-        let value:[String:Any] = ["decision_policy":decisionStatus == nil ? "continuous" : decisionStatus!.manual ? "manual_continuous":"laya_with_confirmed_activity","recording_mode":"mixed","inputs":["system_audio","microphone"],"mixing":["sample_rate":Self.sampleRate,"channels":2,"system_gain":0.5,"microphone_gain":0.5,"jitter_buffer_seconds":Self.latency,"late_frames":lateFrames,"input_frames":sourceFrames,"unavailable_input_frames":unavailableFrames,"statistics_scope":"session_cumulative","resampling":"host_timestamp_linear","echo_cancellation":false]]
+        let value:[String:Any] = ["laya_activity":modelActivity,"decision_policy":decisionStatus == nil ? "continuous" : decisionStatus!.preserveAllAudio ? "continuous_preservation":decisionStatus!.manual ? "manual_continuous":"laya_with_confirmed_activity","recording_mode":"mixed","inputs":["system_audio","microphone"],"mixing":["sample_rate":Self.sampleRate,"channels":2,"system_gain":0.5,"microphone_gain":0.5,"jitter_buffer_seconds":Self.latency,"late_frames":lateFrames,"input_frames":sourceFrames,"unavailable_input_frames":unavailableFrames,"statistics_scope":"session_cumulative","resampling":"host_timestamp_linear","echo_cancellation":false]]
         return (try? JSONSerialization.data(withJSONObject:value,options:[.sortedKeys])).map {String(decoding:$0,as:UTF8.self)} ?? "{}"
     }
 }

@@ -234,3 +234,17 @@ test('real host handshake is visible while native self-check never pretends to c
     assert.deepEqual(after,first);
   } finally {await client.close();f.close()}
 });
+
+test('local preview labels remain qualified and measured place keeps its provenance',()=>{
+  const f=fixture();
+  try {
+    const job=f.store.claim({owner:'fixture',stage:'transcribe',limit:1}).jobs[0];submit(f.store,job,transcription());
+    const id=job.segment_id,preview={label:'工作讨论',status:'model_inference',source_sha256:f.sha,transcript_revision:1};
+    f.store.db.prepare('INSERT INTO meta VALUES (?,?)').run(`local_label:${id}:1`,JSON.stringify(preview));
+    f.store.db.prepare("UPDATE segments SET context_json='{\"place_source\":\"core_location\"}' WHERE id=?").run(id);
+    const result=f.store.search({query:'工作讨论'}).results[0];
+    assert.equal(result.segment_id,id);assert.equal(result.place.source,'core_location');assert.equal(result.local_label.status,'model_inference');
+    assert.equal(f.store.evidence({segment_id:id}).local_label.label,'工作讨论');
+    assert.equal(f.store.db.prepare("SELECT state FROM jobs WHERE segment_id=? AND stage='analyze'").get(id).state,'pending');
+  }finally{f.close()}
+});

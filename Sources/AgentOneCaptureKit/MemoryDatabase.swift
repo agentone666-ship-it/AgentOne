@@ -133,6 +133,7 @@ public final class MemoryDatabase: @unchecked Sendable {
             try execute("UPDATE jobs SET state='cancelled',lease_token=NULL,lease_until_ms=NULL WHERE segment_id=?",[id])
             try execute("UPDATE memories SET status='invalidated',title='',text='',entities_json='[]',input_digest=id WHERE id IN (SELECT memory_id FROM memory_evidence WHERE segment_id=?)",[id])
             try execute("DELETE FROM memory_evidence WHERE memory_id IN (SELECT id FROM memories WHERE status='invalidated')")
+            try execute("DELETE FROM meta WHERE instr(key,?)=1",["local_label:"+id+":"])
             for table in ["transcripts","analyses","corrections"] { try execute("DELETE FROM \(table) WHERE segment_id=?",[id]) }
         }
         if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }

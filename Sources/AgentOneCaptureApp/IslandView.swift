@@ -198,7 +198,8 @@ struct IslandView: View {
                                 Spacer()
                                 if row["state"] == "sealed" { Button("原音") { model.openAudio(row) }.buttonStyle(.plain).foregroundStyle(accent) }
                             }.font(.system(size: 10))
-                            Text(row["text"].flatMap { $0.isEmpty ? nil : $0 } ?? (row["state"] == "incomplete" ? "末段不完整，保留待恢复" : "等待转写")).font(.system(size: 12)).lineLimit(3)
+                            Text(row["text"].flatMap { $0.isEmpty ? nil : $0 } ?? (row["state"] == "incomplete" ? "末段不完整，保留待恢复" : row["transcript_status"]=="no_speech" ? "未识别出语音，原音已保留":"等待转写")).font(.system(size: 12)).lineLimit(3)
+                            if let value=row["local_label_json"],let data=value.data(using:.utf8),let object=try? JSONSerialization.jsonObject(with:data) as? [String:Any],let label=object["label"] as? String {Text("本机建议 · "+label).font(.system(size:10)).foregroundStyle(accent.opacity(0.7))}
                             if let payload = row["payload_json"],let data = payload.data(using: .utf8),let value = try? JSONSerialization.jsonObject(with: data) as? [String:Any],let tags = value["tags"] as? [String] {
                                 Text(tags.joined(separator: " · ")).font(.system(size: 10)).foregroundStyle(accent.opacity(0.7))
                             }
@@ -223,8 +224,13 @@ struct IslandView: View {
                     Toggle("记录应用、网页和交互事件",isOn:Binding(get:{model.eventCaptureEnabled},set:{model.setEventCapture($0)}))
                     Text(model.eventCaptureStatus).font(.system(size:10)).foregroundStyle(.white.opacity(0.4))
                     Button("检查事件详情权限") {model.eventService?.requestDetailsPermission()}.font(.system(size:10))
+                    Picker("保存策略",selection:Binding(get:{model.captureMode},set:{model.setCaptureMode($0)})) {
+                        Text("持续保全 · 推荐").tag("preserve")
+                        Text("智能触发").tag("intelligent")
+                    }.pickerStyle(.segmented)
+                    Text(model.captureMode=="preserve" ? "完整保存系统声音和麦克风，安静与模型异常都不会停录；模型只做分段/标签。手动暂停仍有效。":"只在持续声音与模型确认后保存，可能漏掉轻声或有停顿的会议；不适合必须完整保留的场景。").font(.system(size:10)).foregroundStyle(.white.opacity(0.45))
                     Toggle("自动记录声音",isOn: Binding(get: {model.automaticRecording},set: {model.setAutomaticRecording($0)}))
-                    Text("先听候；持续明显声音与模型稳定确认后才保存。未知或模型异常不会开启录音，手动暂停后保持暂停。").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
+                    Text(model.captureMode=="preserve" ? "授权后自动持续保存；手动暂停后保持暂停，模型不会阻止保全原音。":"先听候；持续声音和模型确认后保存，仍可能漏录。").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
                     Toggle("登录后自动启动",isOn: Binding(get: {model.autoResume},set: {model.setAutoResume($0)}))
                     HStack {
                         Text(model.loginStatus).font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
@@ -235,6 +241,7 @@ struct IslandView: View {
                     Text("关闭锁屏暂停后，将尽量持续记录；休眠时仍会暂停。").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
                     Divider().overlay(.white.opacity(0.08))
                     HStack { VStack(alignment: .leading,spacing: 4) { Text("本机转写"); Text(model.asrStatus).font(.system(size: 10)).foregroundStyle(.white.opacity(0.4)) }; Spacer(); if !model.localASR { Button("启用") { model.enableASR() } } }
+                    Text(model.labelStatus).font(.system(size:10)).foregroundStyle(.white.opacity(0.4))
                     Toggle("允许 Agent 读取原音",isOn: Binding(get: {model.audioExport},set: {model.setAudioExport($0)}))
                     Text("开启后，连接的 Agent 可以通过 MCP 读取音频，宿主可能使用云模型。").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
                 }.font(.system(size: 12)).toggleStyle(.switch).tint(accent).disabled(model.demo)

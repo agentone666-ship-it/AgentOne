@@ -19,6 +19,8 @@ import SwiftUI
     @Published var busy = false
     @Published var hasError = false
     @Published var message = "自动合并电脑声音与麦克风，由本机 Laya 辅助决定录音或听候"
+    @Published var captureMode = UserDefaults.standard.string(forKey:"vNext.captureMode") ?? "preserve"
+    @Published var labelStatus = "本机标签等待转写"
     @Published var automaticRecording = (UserDefaults.standard.object(forKey: "vNext.automaticRecording") as? Bool) ?? true
     @Published var systemReceiving = false
     @Published var microphoneReceiving = false
@@ -52,6 +54,7 @@ import SwiftUI
     let service: AudioCaptureService?
     let eventService: EventCaptureService?
     let worker: LocalTranscriptionWorker?
+    let labeler:LocalTopicLabeler?
     private var desiredRecording = false
     private var sleeping = false
     private var locked = false
@@ -69,6 +72,7 @@ import SwiftUI
         service = db.map { AudioCaptureService(database: $0) }
         eventService = db.map { EventCaptureService(database: $0) }
         worker = db.map { LocalTranscriptionWorker(database: $0) }
+        labeler=db.map {LocalTopicLabeler(database:$0)}
         if db == nil { message = "Memory 目录无法打开；录音不会启动。" }
         service?.onFailure = { [weak self] message in
             guard let self else { return }
@@ -105,7 +109,8 @@ import SwiftUI
                 guard let self else { return }
                 self.refresh()
                 do { try self.service?.heartbeat() } catch { self.hasError = true; self.desiredRecording = false; UserDefaults.standard.set(false,forKey: "vNext.captureDesired"); await self.stop(reason: "storage_error"); self.message = "Memory 状态写入失败，已停止录音" }
-                if let worker = self.worker { Task { await worker.runNext() } }
+                if let worker = self.worker {Task {await worker.runNext()}}
+                if let labeler=self.labeler {Task {await labeler.runNext {text in await self.laya.classifyTranscript(text)};self.labelStatus=labeler.status}}
                 do { try await Task.sleep(for: .seconds(3)) } catch { return }
             }
         }
@@ -129,7 +134,7 @@ import SwiftUI
         decisions=Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else {return}
-                if let service=self.service,service.isRecording,service.automaticDecisions {
+                if let service=self.service,service.isRecording,(service.automaticDecisions || service.preserveAllAudio) {
                     let token=service.sessionToken,evidence=service.activity.startEvidence()
                     let soundState = !evidence.inputsReady ? "输入状态未知，没有可靠的声音证据" : evidence.sustainedSound ? "持续检测到明显声音，声音已稳定持续 3 秒" : evidence.quietSeconds<3 ? "仅有短促声音，没有持续活动":"环境安静，没有明显的连续声音"
                     let state=["声音状态":soundState,"当前状态":service.decisionStatus.snapshot.saving ? "正在录音":"正在听候"]
@@ -182,7 +187,7 @@ import SwiftUI
         if automaticLocation {locationService.start(requestPermission:false)}
         updateMetadata()
         do {
-            try await service.start(allowPermissionPrompts:prompts,automaticDecisions:automaticRecording)
+            try await service.start(allowPermissionPrompts:prompts,automaticDecisions:automaticRecording && captureMode=="intelligent",preserveAllAudio:automaticRecording && captureMode=="preserve")
             if suspended || !desiredRecording { try await service.stop(reason: "start_cancelled"); return }
             listening = service.isRecording
             recording = service.isRecording && service.decisionStatus.snapshot.saving
@@ -190,7 +195,7 @@ import SwiftUI
             hasError = false
             UserDefaults.standard.set(true, forKey: "vNext.captureConsent")
             UserDefaults.standard.set(true, forKey: "vNext.captureDesired")
-            message = automaticRecording ? "先听候，持续声音和模型稳定确认后才录音；不确定时不自动开启" : "系统音与麦克风合并保存 · 原音访问需单独开启"
+            message = automaticRecording ? (captureMode=="preserve" ? "持续保全系统声音与麦克风；模型分段/标记不会停止保存":"先听候，持续声音和模型稳定确认后才录音；不确定时不自动开启") : "系统音与麦克风合并保存 · 原音访问需单独开启"
         } catch {
             hasError = true
             if !automaticRecording { desiredRecording = false; UserDefaults.standard.set(false,forKey: "vNext.captureDesired") }
@@ -307,6 +312,14 @@ import SwiftUI
         }
     }
 
+    func setCaptureMode(_ value:String) {
+        guard !demo,["preserve","intelligent"].contains(value),captureMode != value else {return}
+        captureMode=value;UserDefaults.standard.set(value,forKey:"vNext.captureMode")
+        if listening {
+            Task {await stop(reason:"capture_mode_changed");if desiredRecording {await start(prompts:false)}}
+        }
+    }
+
     func setAutomaticRecording(_ value: Bool) {
         guard !demo else { return }
         automaticRecording = value
@@ -371,9 +384,10 @@ import SwiftUI
             eventRows=try database.rows("SELECT * FROM context_events WHERE hidden=0 AND (?='' OR instr(lower(COALESCE(title,'')||text||COALESCE(application,'')||COALESCE(url,'')),lower(?))>0) ORDER BY started_ms DESC LIMIT 30",[query,query])
             pending = Int(try database.rows("SELECT COUNT(*) AS count FROM jobs WHERE state IN ('pending','leased')").first?["count"] ?? "0") ?? 0
             let sql = """
-            SELECT s.*,t.text,a.payload_json FROM segments s
+            SELECT s.*,t.text,t.status AS transcript_status,a.payload_json,l.value AS local_label_json FROM segments s
             LEFT JOIN transcripts t ON t.segment_id=s.id AND t.revision=(SELECT MAX(revision) FROM transcripts WHERE segment_id=s.id)
             LEFT JOIN analyses a ON a.segment_id=s.id AND a.transcript_revision=t.revision AND a.revision=(SELECT MAX(revision) FROM analyses WHERE segment_id=s.id AND transcript_revision=t.revision)
+            LEFT JOIN meta l ON l.key='local_label:'||s.id||':'||t.revision
             WHERE s.state IN ('sealed','incomplete') AND (?='' OR instr(lower(COALESCE(t.text,'')||COALESCE(a.payload_json,'')||COALESCE(s.place,'')),lower(?))>0)
             ORDER BY s.started_ms DESC LIMIT 12
             """
