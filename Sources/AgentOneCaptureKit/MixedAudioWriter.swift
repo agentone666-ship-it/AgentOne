@@ -24,6 +24,7 @@ public final class MixedAudioWriter: @unchecked Sendable {
     private var blocks: [Int64:Block] = [:]
     private var cursor: Int64?
     private var latest: Int64 = 0
+    private var inputEnds:[String:Int64]=[:]
     private var written = false
     private var closed = false
     private var activityLabel="unknown"
@@ -136,10 +137,23 @@ public final class MixedAudioWriter: @unchecked Sendable {
             blocks[key]=block;index += Int64(count)
         }
         sourceFrames[source,default:0] += end-first
+        inputEnds[source]=max(inputEnds[source] ?? 0,end)
         latest=max(latest,end)
     }
 
     /// Release frames only after the jitter window; absent inputs are zero, never time-compressed.
+    public func flushAvailable(throughHostSeconds cutoff:Double) throws {
+        // A busy writer queue must not advance its cursor past PCM callbacks still queued
+        // behind the timer. The packet watermark advances only after append has consumed data.
+        guard latest>0 else {return}
+        // Let both input queues reach a frame before sealing it. When an input
+        // actually stalls for >3 seconds, continue the other stream with an
+        // explicit missing-input interval rather than stop preserving audio.
+        let active=inputEnds.values.filter {latest-$0<Int64(Self.sampleRate*3)}
+        let watermark=active.min() ?? latest
+        try flush(throughHostSeconds:min(cutoff,host+Double(watermark)/Self.sampleRate-Self.latency))
+    }
+    public func checkpoint() throws {try writer.finish()}
     public func flush(throughHostSeconds cutoff:Double) throws {
         guard !closed,let start=cursor,cutoff.isFinite else {return}
         let end=Int64(floor((cutoff-host)*Self.sampleRate+0.001))

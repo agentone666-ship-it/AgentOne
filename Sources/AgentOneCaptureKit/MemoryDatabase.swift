@@ -113,6 +113,7 @@ public final class MemoryDatabase: @unchecked Sendable {
     }
 
     public func recoverInterruptedSegments() throws {
+        try PCMRecoveryJournal.recover(database:self)
         try transaction {
             for row in try rows("SELECT id,started_ms,source FROM segments WHERE state='recording'") {
                 try execute("UPDATE segments SET state='incomplete',ended_ms=? WHERE id=?", [Self.now, row["id"]])
@@ -137,6 +138,12 @@ public final class MemoryDatabase: @unchecked Sendable {
             for table in ["transcripts","analyses","corrections"] { try execute("DELETE FROM \(table) WHERE segment_id=?",[id]) }
         }
         if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+        if !id.contains("/") {
+            for suffix in [".pcm",".pcm.json",".partial.m4a"] {
+                let temporary=url.deletingLastPathComponent().appendingPathComponent(id+suffix)
+                if FileManager.default.fileExists(atPath:temporary.path) {try FileManager.default.removeItem(at:temporary)}
+            }
+        }
     }
 
     public func verifiedAudioURL(_ id: String) throws -> URL {

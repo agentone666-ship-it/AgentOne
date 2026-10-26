@@ -106,7 +106,7 @@ struct IslandView: View {
             VStack(alignment:.leading,spacing:12) {
                 HStack {
                     LiveAudioGlyph(levels:model.audioLevels,recording:model.recording,size:20).foregroundStyle(accent)
-                    Text("系统声音 ＋ 麦克风").font(.system(size:13,weight:.medium))
+                    Text("系统声音 ＋ Mac 内置麦克风").font(.system(size:13,weight:.medium))
                     Spacer()
                     Text("合并录音").font(.system(size:10)).foregroundStyle(accent)
                 }
@@ -114,7 +114,7 @@ struct IslandView: View {
                 if model.listening {
                     HStack(spacing:12) {
                         Label(model.systemReceiving ? "电脑声音已接入" : "等待电脑声音",systemImage:"speaker.wave.2")
-                        Label(model.microphoneReceiving ? "麦克风已接入" : "等待麦克风",systemImage:"mic")
+                        Label(model.microphoneReceiving ? "Mac 内置麦克风已接入" : "等待 Mac 内置麦克风",systemImage:"mic")
                     }.font(.system(size:9)).foregroundStyle(.white.opacity(0.4))
                 }
             }.padding(16).frame(maxWidth:.infinity,alignment:.leading).background(.white.opacity(0.055),in:RoundedRectangle(cornerRadius:16))

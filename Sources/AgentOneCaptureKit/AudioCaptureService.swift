@@ -8,6 +8,7 @@ public final class CaptureMetadata: @unchecked Sendable {
     private let lock = NSLock()
     private var place: String?
     private var context = "{}"
+    private var microphoneDevice:[String:String]?
     public init() {}
     public func update(place: String?, application: String?, bundleID: String?, location:LocationObservation? = nil) {
         lock.lock(); defer { lock.unlock() }
@@ -18,7 +19,17 @@ public final class CaptureMetadata: @unchecked Sendable {
         if let fresh {value["location"]=fresh.json}
         context = (try? JSONSerialization.data(withJSONObject: value)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
     }
-    func snapshot() -> (String?, String) { lock.lock(); defer { lock.unlock() }; return (place,context) }
+    func snapshot() -> (String?, String) {
+        lock.lock();defer{lock.unlock()}
+        guard let microphoneDevice else {return(place,context)}
+        var value=(context.data(using:.utf8).flatMap{try? JSONSerialization.jsonObject(with:$0)} as? [String:Any]) ?? [:]
+        value["microphone_device"]=microphoneDevice
+        return(place,(try? JSONSerialization.data(withJSONObject:value)).map{String(decoding:$0,as:UTF8.self)} ?? context)
+    }
+    func setMicrophoneDevice(_ device:AVCaptureDevice) {
+        lock.lock();defer{lock.unlock()};microphoneDevice=["name":device.localizedName,"uid":device.uniqueID,"selection":"mac_builtin_only"]
+    }
+    func restore(place:String?,context:String) {lock.lock();defer{lock.unlock()};self.place=place;self.context=context}
 }
 
 private extension String { var nilIfEmpty: String? { isEmpty ? nil : self } }
@@ -29,7 +40,8 @@ private struct OwnedAudioPacket: @unchecked Sendable {
 }
 
 private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
-    let queue = DispatchQueue(label: "life.agentone.audio-writer", qos: .utility)
+    let queue = DispatchQueue(label: "life.agentone.audio-writer", qos: .userInitiated)
+    let inputQueue = DispatchQueue(label: "life.agentone.audio-input", qos: .userInitiated)
     let mixed: MixedAudioWriter
     let activity: CaptureActivityMeter
     let decisionStatus: RecordingDecisionStatus
@@ -49,28 +61,30 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             timer.schedule(deadline:.now(),repeating:.milliseconds(100),leeway:.milliseconds(15))
             timer.setEventHandler { [weak self] in
                 guard let self,!self.failed else {return}
-                do {try self.mixed.flush(throughHostSeconds:CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()))-MixedAudioWriter.latency)}
+                do {try self.mixed.flushAvailable(throughHostSeconds:CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()))-MixedAudioWriter.latency)}
                 catch {self.failed=true;self.onFailure("混合录音已停止："+error.localizedDescription)}
             }
             self.timer=timer;timer.resume()
         }
     }
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard !failed,type == .audio else {return}
+        guard type == .audio else {return}
         do {
             if let packet=try AudioTrackWriter.decodePCM(sampleBuffer) {
-                activity.observe(AudioActivityReading.measure(packet.buffer),source:"system_audio")
-                try mixed.append(packet.buffer,source:"system_audio",presentationSeconds:packet.presentationSeconds)
+                enqueue(packet.buffer,source:"system_audio",presentationSeconds:packet.presentationSeconds)
             }
-        } catch {failed=true;onFailure("系统声音混音失败："+error.localizedDescription)}
+        } catch {onFailure("系统声音采样读取失败："+error.localizedDescription)}
     }
     func enqueueMicrophone(_ buffer: AVAudioPCMBuffer, presentationSeconds: Double) {
+        enqueue(buffer,source:"microphone",presentationSeconds:presentationSeconds)
+    }
+    private func enqueue(_ buffer:AVAudioPCMBuffer,source:String,presentationSeconds:Double) {
         let packet=OwnedAudioPacket(buffer:buffer,presentationSeconds:presentationSeconds)
         queue.async {
             guard !self.failed else {return}
             do {
-                self.activity.observe(AudioActivityReading.measure(packet.buffer),source:"microphone")
-                try self.mixed.append(packet.buffer,source:"microphone",presentationSeconds:packet.presentationSeconds)
+                self.activity.observe(AudioActivityReading.measure(packet.buffer),source:source)
+                try self.mixed.append(packet.buffer,source:source,presentationSeconds:packet.presentationSeconds)
             } catch {self.failed=true;self.onFailure("麦克风混音失败："+error.localizedDescription)}
         }
     }
@@ -88,7 +102,11 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
 }
 
 /// Native capture lifecycle only. It has no model credentials, chat or Agent tools.
-@MainActor public final class AudioCaptureService {
+@MainActor public final class NativeAudioCaptureService {
+    public static func microphoneSelection() throws -> [String:String] {
+        let device=try BuiltInMicrophone.device()
+        return ["name":device.localizedName,"uid":device.uniqueID,"selection":"mac_builtin_only"]
+    }
     public private(set) var isRecording = false
     public private(set) var automaticDecisions = true
     public private(set) var preserveAllAudio = false
@@ -102,6 +120,7 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
     private var sink: AudioStreamSink?
     private var microphoneInput: MicrophoneInput?
     private var lockFD: Int32 = -1
+    private var recordingActivity:NSObjectProtocol?
     private let sessions = CaptureSessionCoordinator()
     public var onFailure: (@MainActor @Sendable (String) -> Void)?
 
@@ -123,11 +142,13 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             throw CaptureFailure.message("另一采集进程正在使用这个 Memory 目录")
         }
         do {
+            recordingActivity=ProcessInfo.processInfo.beginActivity(options:[.userInitiatedAllowingIdleSystemSleep,.latencyCritical],reason:"Preserve authorized continuous audio without App Nap")
             let microphoneAllowed: Bool
             if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized { microphoneAllowed = true }
             else if allowPermissionPrompts { microphoneAllowed = await AVCaptureDevice.requestAccess(for: .audio) }
             else { microphoneAllowed = false }
             guard microphoneAllowed else { throw CaptureFailure.message("请在系统设置中允许 AgentOne 使用麦克风") }
+            metadata.setMicrophoneDevice(try BuiltInMicrophone.device())
             if !allowPermissionPrompts, !CGPreflightScreenCaptureAccess() {
                 throw CaptureFailure.message("系统音权限不可用；请手动继续录音以检查授权")
             }
@@ -136,8 +157,9 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             try database.recoverInterruptedSegments()
             self.automaticDecisions=automaticDecisions && !preserveAllAudio;self.preserveAllAudio=preserveAllAudio
             activity.reset();decisionStatus=RecordingDecisionStatus(manual:!automaticDecisions && !preserveAllAudio,preserveAllAudio:preserveAllAudio);sessionToken=UUID()
+            let activeSession=sessionToken
             let output = AudioStreamSink(database: database, metadata: metadata, activity: activity, decisionStatus:decisionStatus) { [weak self] message in
-                Task { @MainActor in self?.onFailure?(message) }
+                Task { @MainActor in guard let self,self.isRecording,self.sessionToken==activeSession else {return};self.onFailure?(message) }
             }
             let configuration = SCStreamConfiguration()
             configuration.width = 2; configuration.height = 2
@@ -147,16 +169,16 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             configuration.excludesCurrentProcessAudio = true
             configuration.sampleRate = 48_000; configuration.channelCount = 2
             let capture = SCStream(filter: SCContentFilter(display: display, excludingApplications: [], exceptingWindows: []), configuration: configuration, delegate: output)
-            try capture.addStreamOutput(output, type: .audio, sampleHandlerQueue: output.queue)
+            try capture.addStreamOutput(output, type: .audio, sampleHandlerQueue: output.inputQueue)
             // Consume/discard tiny screen frames to avoid SCStream output errors; never save them.
-            try capture.addStreamOutput(output, type: .screen, sampleHandlerQueue: output.queue)
+            try capture.addStreamOutput(output, type: .screen, sampleHandlerQueue: output.inputQueue)
             sink = output; stream = capture
             output.beginMixing()
             try await capture.startCapture()
             microphoneWarning=""
             let microphoneSession=sessionToken
             let microphone = MicrophoneInput(deliver: { buffer,pts in output.enqueueMicrophone(buffer,presentationSeconds: pts) },fail: { [weak self] message in
-                Task { @MainActor in self?.onFailure?(message) }
+                Task { @MainActor in guard let self,self.isRecording,self.sessionToken==activeSession else {return};self.onFailure?(message) }
             },hasSamples:{output.activity.hasSamples(source:"microphone",maxAge:3)},warning:{ [weak self] message in
                 Task { @MainActor in
                     guard let self,self.isRecording,self.sessionToken==microphoneSession else {return}
@@ -225,7 +247,15 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
         try database.setCaptureState(state.saving ? "recording" : "listening", detail: state.detail+(microphoneWarning.isEmpty ? "":" · "+microphoneWarning))
     }
 
+    public func checkpoint() async throws {
+        guard let sink,isRecording else {return}
+        try await withCheckedThrowingContinuation { (continuation:CheckedContinuation<Void,Error>) in
+            sink.queue.async {do {try sink.mixed.checkpoint();continuation.resume()} catch {continuation.resume(throwing:error)}}
+        }
+    }
+
     private func releaseLock() {
+        if let recordingActivity {ProcessInfo.processInfo.endActivity(recordingActivity);self.recordingActivity=nil}
         if lockFD >= 0 { Darwin.lockf(lockFD, F_ULOCK, 0); Darwin.close(lockFD); lockFD = -1 }
     }
 }

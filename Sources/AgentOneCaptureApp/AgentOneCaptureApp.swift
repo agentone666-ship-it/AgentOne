@@ -78,6 +78,7 @@ import SwiftUI
         service?.onFailure = { [weak self] message in
             guard let self else { return }
             self.hasError = true
+            if self.service?.isIndependentRecorder==true {self.message=message;return}
             // Keep automatic intent for the next launch; do not loop on disk/device failures.
             if !self.automaticRecording { self.desiredRecording = false; UserDefaults.standard.set(false,forKey: "vNext.captureDesired") }
             Task { await self.stop(reason: "stream_error"); self.message = message }
@@ -109,7 +110,7 @@ import SwiftUI
             while !Task.isCancelled {
                 guard let self else { return }
                 self.refresh()
-                do { try self.service?.heartbeat() } catch { self.hasError = true; self.desiredRecording = false; UserDefaults.standard.set(false,forKey: "vNext.captureDesired"); await self.stop(reason: "storage_error"); self.message = "Memory 状态写入失败，已停止录音" }
+                do { try self.service?.heartbeat() } catch {self.hasError=true;self.message="采集控制状态暂不可用，请检查 Memory 存储"}
                 if let worker = self.worker {Task {await worker.runNext()}}
                 if let labeler=self.labeler {Task {await labeler.runNext {text in await self.laya.classifyTranscript(text)};self.labelStatus=labeler.status}}
                 do { try await Task.sleep(for: .seconds(3)) } catch { return }
@@ -225,9 +226,12 @@ import SwiftUI
     }
 
     func prepareForExit() async {
-        desiredRecording = false // Cancel an in-flight permission/start request.
         polling?.cancel();metering?.cancel();decisions?.cancel();laya.stop()
-        await stop(reason: "application_exit")
+        if service?.isIndependentRecorder==true {eventService?.stop();locationService.stop();try? service?.heartbeat()}
+        else {
+            desiredRecording=false // Cancel only an in-process capture start.
+            await stop(reason:"application_exit")
+        }
         worker?.releaseOwnLeases()
     }
 
@@ -504,7 +508,7 @@ import SwiftUI
             Button("展开灵动岛") { delegate.expandIsland() }
             Button("暂停录音") { CaptureModel.shared.pauseRecording() }
             Divider()
-            Button("退出 AgentOne") { NSApp.terminate(nil) }
+            Button("退出灵动岛（后台继续录音）") { NSApp.terminate(nil) }
         }
     }
 }

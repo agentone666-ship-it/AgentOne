@@ -14,6 +14,7 @@ public final class AudioTrackWriter: @unchecked Sendable {
     private let metadata: @Sendable () -> (String?, String)
     private let finishingContext: @Sendable () -> String
     private var file: AVAudioFile?
+    private var journal:PCMRecoveryJournal?
     private var segmentID: String?
     private var url: URL?
     private var firstPTS: Double = 0
@@ -68,7 +69,9 @@ public final class AudioTrackWriter: @unchecked Sendable {
             // ScreenCaptureKit normally uses the host clock. Retain a labeled
             // arrival-based fallback when a device supplies another clock.
             let nowHost = CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()))
-            if abs(nowHost - pts) > 30 {
+            // Mixed PCM is explicitly mapped to this session's host anchor. Queue
+            // latency must never remap later segments to their arrival time.
+            if source != "mixed", abs(nowHost - pts) > 30 {
                 mapping = "arrival_estimate"
                 offset = nowHost - pts
             } else { mapping = "host_clock"; offset = 0 }
@@ -91,10 +94,16 @@ public final class AudioTrackWriter: @unchecked Sendable {
                 MemoryDatabase.ms(date(for: pts)),MemoryDatabase.ms(date(for: pts)),TimeZone.current.identifier,
                 String(pts),String(hostAnchor),mapping,String(buffer.format.sampleRate),String(buffer.format.channelCount),relative,nil,
                 "recording",place,context,MemoryDatabase.now])
+            if source=="mixed" {journal=try PCMRecoveryJournal(id:id,directory:url.deletingLastPathComponent(),startedMS:Double(MemoryDatabase.ms(date(for:pts)))!,sampleRate:buffer.format.sampleRate,channels:Int(buffer.format.channelCount),context:context)}
         }
         let reading = AudioActivityReading.measure(buffer)
         activity.observe(reading)
         onActivity(reading)
+        var currentContext=(segmentContext.data(using:.utf8).flatMap{try? JSONSerialization.jsonObject(with:$0)} as? [String:Any]) ?? [:]
+        currentContext["audio_activity"]=activity.json
+        if let extra=finishingContext().data(using:.utf8).flatMap({try? JSONSerialization.jsonObject(with:$0)}) as? [String:Any] {currentContext.merge(extra){_,new in new}}
+        let checkpoint=String(decoding:try JSONSerialization.data(withJSONObject:currentContext),as:UTF8.self)
+        try journal?.append(buffer,context:checkpoint)
         try file?.write(from: buffer)
         endPTS = max(endPTS, pts + duration)
     }
@@ -102,6 +111,10 @@ public final class AudioTrackWriter: @unchecked Sendable {
     public func finish() throws {
         guard let id = segmentID, let url else { return }
         file = nil // Flush the container before exposing it to another process.
+        if let journal,let url=self.url {
+            let check=try AVAudioFile(forReading:url)
+            guard abs(Int64(check.length)-journal.frames)<4096 else {throw CaptureFailure.message("AAC 封口长度与恢复日志不一致")}
+        }
         let finalURL = url.deletingLastPathComponent().appendingPathComponent("\(id).m4a")
         try FileManager.default.moveItem(at: url, to: finalURL)
         let hash = SHA256.hash(data: try Data(contentsOf: finalURL)).map { String(format: "%02x", $0) }.joined()
@@ -134,6 +147,7 @@ public final class AudioTrackWriter: @unchecked Sendable {
             try database.execute("INSERT OR IGNORE INTO jobs (id,segment_id,stage,source_hash,state,created_ms,updated_ms) VALUES (?,?,'transcribe',?,'pending',?,?)",
                 [UUID().uuidString,id,hash,MemoryDatabase.now,MemoryDatabase.now])
         }
+        try journal?.removeAfterSeal();journal=nil
         segmentID = nil; self.url = nil; format = nil; sealedCount += 1
     }
 

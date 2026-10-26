@@ -51,3 +51,5 @@ capture.lock
 .vscode/
 *.swp
 *.swo
+__pycache__/
+*.pyc

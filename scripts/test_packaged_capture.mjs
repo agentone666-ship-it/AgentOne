@@ -21,6 +21,11 @@ try {
   assert.equal(existsSync(join(app,'Contents/Resources/AgentOne_AgentOneApp.bundle')),false);
   assert.equal(readFileSync(join(app,'Contents/Resources/laya-worker.py'),'utf8'),readFileSync('tools/laya-decision/worker.py','utf8'));
   const executable=join(app,'Contents/MacOS/AgentOne');
+  const recorder=join(app,'Contents/Helpers/AgentOneRecorder.app/Contents/MacOS/AgentOneRecorder');
+  assert.equal(existsSync(recorder),true);
+  const recorderCheck=JSON.parse(run(recorder,['--self-check']));
+  assert.equal(recorderCheck.agent_runtime,false);assert.equal(recorderCheck.recording_started,false);
+  assert.equal(recorderCheck.role,'native_audio_recorder');
   const check=JSON.parse(run(executable,['--self-check']));
   assert.equal(check.agent_runtime,false);assert.equal(check.recording_started,false);assert.equal(check.recording_output,'mixed');assert.equal(check.schema,2);
   assert.deepEqual(check.sources,['system_audio','microphone']);

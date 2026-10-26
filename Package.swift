@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "AgentOneCredentialStore", targets: ["AgentOneCredentialStore"]),
         .library(name: "AgentOnePiRuntime", targets: ["AgentOnePiRuntime"]),
         .executable(name: "AgentOne", targets: ["AgentOneCaptureApp"]),
+        .executable(name: "AgentOneRecorder", targets: ["AgentOneRecorder"]),
         .executable(name: "AgentOneLegacy", targets: ["AgentOneApp"]),
         .library(name: "AgentOneCaptureKit", targets: ["AgentOneCaptureKit"]),
         .executable(name: "AgentOneAudioHarness", targets: ["AgentOneAudioHarness"]),
@@ -21,6 +22,7 @@ let package = Package(
     targets: [
         .target(name: "AgentOneCaptureKit", dependencies: ["AgentOneCore"], resources: [.process("Resources")]),
         .executableTarget(name: "AgentOneCaptureApp", dependencies: ["AgentOneCaptureKit"]),
+        .executableTarget(name: "AgentOneRecorder", dependencies: ["AgentOneCaptureKit"]),
         .executableTarget(name: "AgentOneAudioHarness", dependencies: ["AgentOneCaptureKit"]),
         .testTarget(name: "AgentOneCaptureKitTests", dependencies: ["AgentOneCaptureKit"]),
         .testTarget(name: "AgentOneIslandTests", dependencies: ["AgentOneCaptureApp"]),

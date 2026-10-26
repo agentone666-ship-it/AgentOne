@@ -25,6 +25,13 @@ integration() {
     fixture_dir="$(mktemp -d "${TMPDIR:-/tmp}/agentone-audio-ci.XXXXXX")"
     swift run --skip-build AgentOneAudioHarness --home "$fixture_dir"
     node scripts/test_capture_interop.mjs "$fixture_dir"
+    crash_dir="$(mktemp -d "${TMPDIR:-/tmp}/agentone-pcm-crash-ci.XXXXXX")"
+    set +e
+    swift run --skip-build AgentOneAudioHarness --home "$crash_dir" --crash-journal
+    crash_exit=$?
+    set -e
+    test "$crash_exit" -eq 77
+    swift run --skip-build AgentOneAudioHarness --home "$crash_dir" --recover-journal
 }
 
 package() {
