@@ -1,0 +1,7 @@
+{
+  "tool": "built-in image_gen.imagegen",
+  "asset": "hero.png",
+  "reference": "identity-board.png",
+  "transparent_background": false,
+  "prompt": "Use case: logo-brand / precise-object-edit. Create one finished horizontal GitHub README brand header for the product Thenvia / 留境, using the supplied identity board as the ONLY visual identity reference. Preserve the distinctive exact three-part logo silhouette: upper-left rounded corner, rising ribbon curling at upper right, lower-right rounded return. Preserve the Thenvia typography and accurate Chinese 留境. The output is a SIMPLE single main lockup, NOT a multi-panel identity board. Wide 2:1 aspect ratio, approximately 1600x800. Flat warm ivory #F5F3EC background, generous negative space, quiet excellent premium macOS independent-software branding. Center the entire composition. Place the large symbol to the left of the English wordmark Thenvia, with smaller Chinese 留境 beneath the English wordmark aligned to its left edge. Near-black #101715 frame pieces and wordmark, soft mint #98D8C0 central ribbon. Beneath the lockup a single small but highly legible tagline, exact text: \"Context carried forward.\" Letter-perfect spelling T h e n v i a. No extra copy, no footer labels, no BRAND CONCEPT, no small tiles, no app-icon variations, no screenshots, no photos, no grain, no texture, no shadows, no 3D or perspective, no decorative sparkle. Crisp flat edges and balanced negative space. This is an actual publishable brand banner, not a design exploration sheet."
+}

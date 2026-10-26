@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 开始使用 / Getting started
+    url: https://github.com/agentone666-ship-it/Thenvia/blob/main/docs/GETTING_STARTED.md
+    about: 查看开发预览、权限、录音状态与 Agent 接入步骤。
+  - name: 隐私与数据控制 / Privacy
+    url: https://github.com/agentone666-ship-it/Thenvia/blob/codex/audio-memory-mvp/docs/PRIVACY.md
+    about: 了解本机资料、原音访问和宿主数据路径。请勿在公开 Issue 上传私人资料。
