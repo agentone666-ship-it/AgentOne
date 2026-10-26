@@ -92,6 +92,7 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
     public private(set) var isRecording = false
     public private(set) var automaticDecisions = true
     public private(set) var preserveAllAudio = false
+    public private(set) var microphoneWarning = ""
     public let metadata = CaptureMetadata()
     public let activity = CaptureActivityMeter()
     public private(set) var decisionStatus = RecordingDecisionStatus()
@@ -146,8 +147,15 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
             sink = output; stream = capture
             output.beginMixing()
             try await capture.startCapture()
+            microphoneWarning=""
+            let microphoneSession=sessionToken
             let microphone = MicrophoneInput(deliver: { buffer,pts in output.enqueueMicrophone(buffer,presentationSeconds: pts) },fail: { [weak self] message in
                 Task { @MainActor in self?.onFailure?(message) }
+            },hasSamples:{output.activity.hasSamples(source:"microphone",maxAge:3)},warning:{ [weak self] message in
+                Task { @MainActor in
+                    guard let self,self.isRecording,self.sessionToken==microphoneSession else {return}
+                    self.microphoneWarning=message
+                }
             })
             microphoneInput = microphone
             try microphone.start()
@@ -212,7 +220,7 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
     public func heartbeat() throws {
         guard isRecording else { return }
         let state=decisionStatus.snapshot
-        try database.setCaptureState(state.saving ? "recording" : "listening", detail: state.detail)
+        try database.setCaptureState(state.saving ? "recording" : "listening", detail: state.detail+(microphoneWarning.isEmpty ? "":" · "+microphoneWarning))
     }
 
     private func releaseLock() {

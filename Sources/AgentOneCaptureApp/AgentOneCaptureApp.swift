@@ -24,6 +24,7 @@ import SwiftUI
     @Published var automaticRecording = (UserDefaults.standard.object(forKey: "vNext.automaticRecording") as? Bool) ?? true
     @Published var systemReceiving = false
     @Published var microphoneReceiving = false
+    @Published var inputWarning = ""
     @Published var systemHasSound = false
     @Published var microphoneHasSound = false
     @Published var loginStatus = ""
@@ -372,6 +373,7 @@ import SwiftUI
         updateMetadata()
         systemReceiving = listening && (service?.activity.hasSamples(source: "system_audio") ?? false)
         microphoneReceiving = listening && (service?.activity.hasSamples(source: "microphone") ?? false)
+        inputWarning = listening ? service?.microphoneWarning ?? "":""
         systemHasSound = listening && (service?.activity.hasSound(source: "system_audio") ?? false)
         microphoneHasSound = listening && (service?.activity.hasSound(source: "microphone") ?? false)
         do {

@@ -10,8 +10,8 @@ struct IslandView: View {
     @State private var showEvents = false
     @State private var expandedEventID: String?
     private let accent = Color(red: 0.55,green: 0.9,blue: 0.84)
-    private var status: String { model.demo ? "界面演示" : model.hasError ? "需要留意" : model.recording ? (model.automaticRecording ? "自动记录中" : "记录中") : model.listening ? "听候中" : "未录音" }
-    private var tint: Color { model.hasError ? .orange : model.recording ? accent : model.listening ? .cyan : .white.opacity(0.45) }
+    private var status: String { model.demo ? "界面演示" : model.hasError || !model.inputWarning.isEmpty ? "需要留意" : model.recording ? (model.automaticRecording ? "自动记录中" : "记录中") : model.listening ? "听候中" : "未录音" }
+    private var tint: Color { model.hasError || !model.inputWarning.isEmpty ? .orange : model.recording ? accent : model.listening ? .cyan : .white.opacity(0.45) }
     private var notched: Bool { model.notchHeight > 0 }
     private var shape: UnevenRoundedRectangle {
         UnevenRoundedRectangle(topLeadingRadius: notched ? 0 : 20,bottomLeadingRadius: model.expanded ? 30 : 12,bottomTrailingRadius: model.expanded ? 30 : 12,topTrailingRadius: notched ? 0 : 20)
@@ -133,6 +133,7 @@ struct IslandView: View {
                     .background(accent,in: Capsule())
             }.buttonStyle(.plain).disabled(model.busy || model.demo)
             Text(model.listening ? model.decisionStatus : model.message).font(.system(size: 10)).foregroundStyle(model.hasError ? .orange : .white.opacity(0.4)).lineLimit(2).fixedSize(horizontal: false,vertical: true)
+            if !model.inputWarning.isEmpty {Text(model.inputWarning).font(.system(size:10)).foregroundStyle(.orange).fixedSize(horizontal:false,vertical:true)}
             Spacer(minLength: 0)
         }
     }
