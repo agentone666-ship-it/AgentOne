@@ -1,5 +1,5 @@
 import { chatCompletionsEndpoint } from "./completions-url.js";
-import { createAssistantMessageEventStream, type AssistantMessage } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, collapseSystemMessages, getCurrentTools, getSystemMessageText, type AssistantMessage, type ToolCall } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 
 /** Preserve Pi's tool loop for gateways that only implement non-streaming completions. */
@@ -15,9 +15,13 @@ export const nonStreamingCompletions: StreamFn = (model, context, options) => {
   void (async () => {
     try {
       const messages: Record<string, unknown>[] = [];
-      if (context.systemPrompt) messages.push({ role: "system", content: context.systemPrompt });
-      for (const item of context.messages) {
-        if (item.role === "user") {
+      // Pi 1.x carries system prompts and tool deltas inside the transcript.
+      // Replay them before converting to a gateway without mid-turn updates.
+      const tools = getCurrentTools(context.messages);
+      for (const item of collapseSystemMessages(context).messages) {
+        if (item.role === "system") {
+          messages.push({ role: "system", content: getSystemMessageText(item) });
+        } else if (item.role === "user") {
           messages.push({ role: "user", content: typeof item.content === "string" ? item.content : item.content.filter(c => c.type === "text").map(c => c.text).join("\n") });
         } else if (item.role === "toolResult") {
           messages.push({ role: "tool", tool_call_id: item.toolCallId, content: item.content.filter(c => c.type === "text").map(c => c.text).join("\n") });
@@ -31,7 +35,7 @@ export const nonStreamingCompletions: StreamFn = (model, context, options) => {
         method: "POST", headers: { ...model.headers, "Content-Type": "application/json", Authorization: `Bearer ${options?.apiKey ?? ""}` },
         ...(options?.signal ? { signal: options.signal } : {}),
         body: JSON.stringify({ model: model.id, messages, stream: false, max_tokens: options?.maxTokens ?? model.maxTokens,
-          ...(context.tools?.length ? { tools: context.tools.map(tool => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.parameters } })) } : {}) }),
+          ...(tools.length ? { tools: tools.map(tool => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.parameters } })) } : {}) }),
       });
       httpStatus = response.status;
       if (!response.ok) throw new Error(`Model HTTP ${response.status}`);
@@ -45,12 +49,13 @@ export const nonStreamingCompletions: StreamFn = (model, context, options) => {
       for (const call of choice.message.tool_calls ?? []) {
         const args: unknown = JSON.parse(call.function.arguments);
         if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("Invalid tool arguments");
-        message.content.push({ type: "toolCall", id: call.id, name: call.function.name, arguments: args as Record<string, unknown> });
+        message.content.push({ type: "toolCall", id: call.id, name: call.function.name, arguments: args as ToolCall["arguments"] });
       }
       message.usage.input = body.usage?.prompt_tokens ?? 0;
       message.usage.output = body.usage?.completion_tokens ?? 0;
       message.usage.totalTokens = body.usage?.total_tokens ?? message.usage.input + message.usage.output;
       message.stopReason = choice.message.tool_calls?.length ? "toolUse" : choice.finish_reason === "length" ? "length" : "stop";
+      stream.push({ type: "start", partial: message });
       stream.push({ type: "done", reason: message.stopReason, message });
     } catch {
       message.stopReason = options?.signal?.aborted ? "aborted" : "error";

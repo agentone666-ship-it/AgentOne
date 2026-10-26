@@ -5,29 +5,19 @@ import {
   Agent,
   type AgentEvent,
   type AgentMessage,
+  type StreamFn,
 } from "@earendil-works/pi-agent-core";
 import {
   fauxAssistantMessage,
   fauxText,
   fauxToolCall,
-  getModel,
-  registerApiProvider,
-  registerFauxProvider,
+  createFauxCore,
   type AssistantMessage,
   type Model,
 } from "@earendil-works/pi-ai";
-import {
-  streamOpenAIResponses,
-  streamSimpleOpenAIResponses,
-} from "@earendil-works/pi-ai/openai-responses";
-import {
-  streamOpenAICompletions,
-  streamSimpleOpenAICompletions,
-} from "@earendil-works/pi-ai/openai-completions";
-import {
-  streamAnthropic,
-  streamSimpleAnthropic,
-} from "@earendil-works/pi-ai/anthropic";
+import { streamSimple as streamResponses } from "@earendil-works/pi-ai/api/openai-responses";
+import { streamSimple as streamCompletions } from "@earendil-works/pi-ai/api/openai-completions";
+import { streamSimple as streamAnthropic } from "@earendil-works/pi-ai/api/anthropic-messages";
 import {
   convertAgentOneMessages,
   transformAgentOneContext,
@@ -43,25 +33,28 @@ import type {
 } from "./protocol.js";
 import { createSafeTools, type WakeToolState } from "./tools.js";
 
-// Pi normally lazy-loads provider modules. That works in a source Node process,
-// but a Deno-compiled sidecar cannot discover a dependency that was only named
-// by the provider registry's runtime import. Register the concrete Responses
-// implementation here so it is included in the self-contained app binary.
-registerApiProvider({
-  api: "openai-responses",
-  stream: streamOpenAIResponses,
-  streamSimple: streamSimpleOpenAIResponses,
-}, "agentone-static-openai-responses");
-registerApiProvider({
-  api: "openai-completions",
-  stream: streamOpenAICompletions,
-  streamSimple: streamSimpleOpenAICompletions,
-}, "agentone-static-openai-completions");
-registerApiProvider({
-  api: "anthropic-messages",
-  stream: streamAnthropic,
-  streamSimple: streamSimpleAnthropic,
-}, "agentone-static-anthropic-messages");
+// Bind concrete APIs instead of the removed global provider registry. Static
+// imports also keep the optional legacy sidecar self-contained when compiled.
+const providerStream: StreamFn = (model, context, options) => {
+  switch (model.api) {
+    case "openai-responses": return streamResponses(model as Model<"openai-responses">, context, options);
+    case "openai-completions": return streamCompletions(model as Model<"openai-completions">, context, options);
+    case "anthropic-messages": return streamAnthropic(model as Model<"anthropic-messages">, context, options);
+    default: throw new RuntimePolicyError("model_provider_unsupported", `Unsupported model API: ${model.api}`);
+  }
+};
+
+// Keep the existing Kimi OAuth wire contract. Pi 1.4's catalog switches to
+// Chat Completions, but changing that separate integration is outside this
+// dependency migration; the loop still supports the concrete Anthropic API.
+function kimiModel(id: string): Model<"anthropic-messages"> {
+  return { id, name: "Kimi For Coding", api: "anthropic-messages", provider: "kimi-coding",
+    baseUrl: "https://api.kimi.com/coding", headers: { "User-Agent": "KimiCLI/1.5" },
+    reasoning: true, input: ["text", "image"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 262144, maxTokens: 32768 };
+}
+
+type ResolvedModel = { model: Model<any>; streamFn: StreamFn; cleanup: () => void };
 
 export interface WakeResult {
   outcome: string;
@@ -169,7 +162,7 @@ export async function runChat(
   let stoppedByBudget = false;
   const resolvedModel = resolveChatModel(payload, modelConfiguration);
   const agent = new Agent({
-    ...(modelConfiguration.provider === "openai-compatible-completions" ? { streamFn: nonStreamingCompletions } : {}),
+    streamFn: resolvedModel.streamFn,
     beforeToolCall: async () => {
       if (counters.toolCalls >= 8 || counters.turns >= 6 || counters.inputTokens + counters.outputTokens >= payload.maxTokens) {
         stoppedByBudget = true;
@@ -297,6 +290,7 @@ async function runWakeWithModel(
   };
 
   const agent = new Agent({
+    streamFn: resolvedModel.streamFn,
     initialState: {
       systemPrompt: systemPrompt,
       model: resolvedModel.model,
@@ -394,7 +388,7 @@ function resolveModel(
   payload: WakePayload,
   configuration: RuntimeModelConfiguration,
   allowedTools: Set<SafeToolName>,
-): { model: Model<any>; cleanup: () => void } {
+): ResolvedModel {
   if (configuration.route !== "offline") {
     if (!configuration.apiKey) {
       throw new RuntimePolicyError("model_credential_missing", "Model credential is missing.");
@@ -402,9 +396,7 @@ function resolveModel(
     if (configuration.provider !== "ollama" && configuration.provider !== "openai-compatible-completions" && configuration.provider !== "kimi-coding") {
       throw new RuntimePolicyError("model_provider_unsupported", `Unsupported model provider: ${configuration.provider}`);
     }
-    const known = getModel("kimi-coding", configuration.provider === "kimi-coding"
-      ? configuration.model as "kimi-for-coding" | "kimi-k2-thinking"
-      : "kimi-for-coding");
+    const known = kimiModel(configuration.model);
     const model: Model<any> = configuration.provider === "kimi-coding"
       ? {
           ...known,
@@ -435,22 +427,22 @@ function resolveModel(
             supportsLongCacheRetention: false,
           },
         };
-    return { model, cleanup: () => {} };
+    return { model, streamFn: providerStream, cleanup: () => {} };
   }
 
-  const faux = registerFauxProvider({
+  const faux = createFauxCore({
     api: "agentone-offline",
     provider: "agentone-offline",
     models: [{ id: "agentone-policy-v1", name: "AgentOne Offline Policy Model", contextWindow: 16_000, maxTokens: payload.budget.maxTokens }],
   });
   faux.setResponses(buildOfflineResponses(payload, allowedTools));
-  return { model: faux.getModel(), cleanup: () => faux.unregister() };
+  return { model: faux.getModel(), streamFn: faux.streamSimple, cleanup: () => {} };
 }
 
 function resolveChatModel(
   payload: ChatPayload,
   configuration: RuntimeModelConfiguration,
-): { model: Model<any>; cleanup: () => void } {
+): ResolvedModel {
   if (configuration.route !== "offline") {
     if (!configuration.apiKey) {
       throw new RuntimePolicyError("model_credential_missing", "Model credential is missing.");
@@ -458,9 +450,7 @@ function resolveChatModel(
     if (configuration.provider !== "ollama" && configuration.provider !== "openai-compatible-completions" && configuration.provider !== "kimi-coding") {
       throw new RuntimePolicyError("model_provider_unsupported", `Unsupported model provider: ${configuration.provider}`);
     }
-    const known = getModel("kimi-coding", configuration.provider === "kimi-coding"
-      ? configuration.model as "kimi-for-coding" | "kimi-k2-thinking"
-      : "kimi-for-coding");
+    const known = kimiModel(configuration.model);
     const model: Model<any> = configuration.provider === "kimi-coding"
       ? {
           ...known,
@@ -491,10 +481,10 @@ function resolveChatModel(
             supportsLongCacheRetention: false,
           },
         };
-    return { model, cleanup: () => {} };
+    return { model, streamFn: configuration.provider === "openai-compatible-completions" ? nonStreamingCompletions : providerStream, cleanup: () => {} };
   }
 
-  const faux = registerFauxProvider({
+  const faux = createFauxCore({
     api: "agentone-offline",
     provider: "agentone-offline",
     models: [{ id: "agentone-policy-v1", name: "AgentOne Offline Companion", contextWindow: 16_000, maxTokens: payload.maxTokens }],
@@ -502,7 +492,7 @@ function resolveChatModel(
   faux.setResponses([
     fauxAssistantMessage(fauxText("我现在还没有模型口粮，但我在。你可以先把想法放在这里，我会陪你记住。")),
   ]);
-  return { model: faux.getModel(), cleanup: () => faux.unregister() };
+  return { model: faux.getModel(), streamFn: faux.streamSimple, cleanup: () => {} };
 }
 
 export class RuntimePolicyError extends Error {
