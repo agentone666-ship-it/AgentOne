@@ -13,6 +13,7 @@ import Darwin
     private var retryAfter=Date.distantPast
     private var attempts=0
     private var lastHeartbeat=Date.distantPast
+    private var lastSilenceCleanup=Date()
     private var healthySince:Date?
     private var decisionNonce:String?,sealNonce:String?
     private var pauseNonce:String?
@@ -25,6 +26,7 @@ import Darwin
         guard fd>=0 else {throw CaptureFailure.message("无法锁定采集进程")}
         guard Darwin.lockf(fd,F_TLOCK,0)==0 else {Darwin.close(fd);return}
         defer {Darwin.close(fd)}
+        SilencePruner.enqueueExisting(root: database.root)
         service.onFailure={ [weak self] message in self?.failure=message;self?.log("capture_failure",detail:message) }
         service.onUserStopped={ [weak self] in self?.userStopRequested=true }
         service.onDiagnostic={ [weak self] message in self?.log("system_stream_status",detail:message) }
@@ -36,6 +38,7 @@ import Darwin
         try publish(mode:"preserve")
         while !Task.isCancelled {
             do {
+                if Date().timeIntervalSince(lastSilenceCleanup)>300 {lastSilenceCleanup=Date();SilencePruner.enqueueExisting(root:database.root)}
                 if var control=try? RecorderFiles.read(RecorderControl.self,from:RecorderFiles.control(database.root)),["preserve","intelligent","manual"].contains(control.mode) {
                     if userStopRequested {
                         userStopRequested=false;let nonce=UUID().uuidString;userStopNonce=nonce

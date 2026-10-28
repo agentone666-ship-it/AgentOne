@@ -17,6 +17,11 @@ import Darwin
         }
         guard let index=CommandLine.arguments.firstIndex(of:"--root"),index+1<CommandLine.arguments.count else {return}
         let root=URL(fileURLWithPath:CommandLine.arguments[index+1])
+        if CommandLine.arguments.contains("--prune-silence") {
+            let database=try MemoryDatabase(root:root)
+            let report=try await Task.detached(priority:.utility) {try SilencePruner.scan(database:database,apply:CommandLine.arguments.contains("--apply"))}.value
+            print(String(decoding:try JSONEncoder().encode(report),as:UTF8.self));return
+        }
         if CommandLine.arguments.contains("--request-system-reconnect") {
             try RecorderSupervisor.requestSystemReconnect(root:root);return
         }

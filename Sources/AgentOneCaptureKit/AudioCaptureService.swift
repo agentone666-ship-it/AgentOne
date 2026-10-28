@@ -52,7 +52,7 @@ private final class AudioStreamSink: NSObject, SCStreamOutput, SCStreamDelegate,
     fileprivate var failed = false
     init(database: MemoryDatabase, metadata: CaptureMetadata, activity: CaptureActivityMeter, decisionStatus: RecordingDecisionStatus,onSystemFailure:@escaping @Sendable (ObjectIdentifier,String,Int)->Void,onFailure: @escaping @Sendable (String) -> Void) {
         let host = CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()))
-        mixed = MixedAudioWriter(database:database,sessionID:UUID().uuidString,wallAnchor:Date(),hostAnchor:host,decisionStatus:decisionStatus,onActivity:{activity.observe($0,source:"mixed")},metadata:{metadata.snapshot()})
+        mixed = MixedAudioWriter(database:database,sessionID:UUID().uuidString,wallAnchor:Date(),hostAnchor:host,discardSilence:true,decisionStatus:decisionStatus,onActivity:{activity.observe($0,source:"mixed")},metadata:{metadata.snapshot()})
         self.database=database;self.decisionStatus=decisionStatus;self.activity=activity;self.onFailure=onFailure;self.onSystemFailure=onSystemFailure
     }
     func beginMixing() {

@@ -11,6 +11,7 @@ public final class AudioTrackWriter: @unchecked Sendable {
     private let wallAnchor: Date
     private let hostAnchor: Double
     private let segmentSeconds: Double
+    private let discardSilence: Bool
     private let metadata: @Sendable () -> (String?, String)
     private let finishingContext: @Sendable () -> String
     private var file: AVAudioFile?
@@ -28,10 +29,11 @@ public final class AudioTrackWriter: @unchecked Sendable {
     public private(set) var sealedCount = 0
 
     public init(database: MemoryDatabase, source: String, sessionID: String, wallAnchor: Date, hostAnchor: Double,
-                segmentSeconds: Double = 60, onActivity: @escaping @Sendable (AudioActivityReading?) -> Void = { _ in }, finishingContext: @escaping @Sendable () -> String = { "{}" }, metadata: @escaping @Sendable () -> (String?, String) = { (nil, "{}") }) {
+                segmentSeconds: Double = 60, discardSilence: Bool = false, onActivity: @escaping @Sendable (AudioActivityReading?) -> Void = { _ in }, finishingContext: @escaping @Sendable () -> String = { "{}" }, metadata: @escaping @Sendable () -> (String?, String) = { (nil, "{}") }) {
         self.database = database; self.source = source; self.sessionID = sessionID
         self.onActivity = onActivity; self.finishingContext=finishingContext
         self.wallAnchor = wallAnchor; self.hostAnchor = hostAnchor; self.segmentSeconds = segmentSeconds; self.metadata = metadata
+        self.discardSilence = discardSilence
     }
 
     public func consume(_ sample: CMSampleBuffer) throws {
@@ -149,6 +151,7 @@ public final class AudioTrackWriter: @unchecked Sendable {
         }
         try journal?.removeAfterSeal();journal=nil
         segmentID = nil; self.url = nil; format = nil; sealedCount += 1
+        if discardSilence { SilencePruner.enqueue(root: database.root, id: id) }
     }
 
     private func date(for pts: Double) -> Date { wallAnchor.addingTimeInterval(pts + offset - hostAnchor) }

@@ -18,6 +18,7 @@ public final class MixedAudioWriter: @unchecked Sendable {
     private let host: Double
     private let sessionID: String
     private let segmentSeconds: Double
+    private let discardSilence: Bool
     private let metadata: @Sendable () -> (String?,String)
     private let onActivity: @Sendable (AudioActivityReading?) -> Void
     private let decisionStatus: RecordingDecisionStatus?
@@ -51,7 +52,7 @@ public final class MixedAudioWriter: @unchecked Sendable {
     private var sourceFrames: [String:Int64] = [:]
     private var unavailableFrames: [String:Int64] = [:]
     private let format = AVAudioFormat(standardFormatWithSampleRate:sampleRate,channels:2)!
-    private lazy var writer = AudioTrackWriter(database:database,source:"mixed",sessionID:sessionID,wallAnchor:wall,hostAnchor:host,segmentSeconds:segmentSeconds,
+    private lazy var writer = AudioTrackWriter(database:database,source:"mixed",sessionID:sessionID,wallAnchor:wall,hostAnchor:host,segmentSeconds:segmentSeconds,discardSilence:discardSilence,
         finishingContext: { [weak self] in self?.mixingContext() ?? "{}" },metadata:metadata)
     private lazy var gate = decisionStatus.map { status in RecordingGate(status:status,
         write:{[unowned self] buffer,pts in try self.writer.append(buffer,presentationSeconds:pts)},
@@ -64,8 +65,9 @@ public final class MixedAudioWriter: @unchecked Sendable {
     }
     public var sealedCount: Int { writer.sealedCount }
 
-    public init(database:MemoryDatabase,sessionID:String,wallAnchor:Date,hostAnchor:Double,segmentSeconds:Double = 60,decisionStatus:RecordingDecisionStatus? = nil,onActivity:@escaping @Sendable (AudioActivityReading?) -> Void = {_ in},metadata:@escaping @Sendable () -> (String?,String) = {(nil,"{}")}) {
+    public init(database:MemoryDatabase,sessionID:String,wallAnchor:Date,hostAnchor:Double,segmentSeconds:Double = 60,discardSilence:Bool = false,decisionStatus:RecordingDecisionStatus? = nil,onActivity:@escaping @Sendable (AudioActivityReading?) -> Void = {_ in},metadata:@escaping @Sendable () -> (String?,String) = {(nil,"{}")}) {
         self.onActivity=onActivity;self.decisionStatus=decisionStatus;self.database=database;self.sessionID=sessionID;wall=wallAnchor;host=hostAnchor;self.segmentSeconds=segmentSeconds;self.metadata=metadata
+        self.discardSilence=discardSilence
     }
     public func consume(_ sample:CMSampleBuffer,source:String) throws {
         if let packet=try AudioTrackWriter.decodePCM(sample) {try append(packet.buffer,source:source,presentationSeconds:packet.presentationSeconds)}

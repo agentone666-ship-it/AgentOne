@@ -158,6 +158,47 @@ public final class MemoryDatabase: @unchecked Sendable {
             try execute("DELETE FROM meta WHERE instr(key,?)=1",["local_label:"+id+":"])
             for table in ["transcripts","analyses","corrections"] { try execute("DELETE FROM \(table) WHERE segment_id=?",[id]) }
         }
+        try removeAudioFiles(id: id, url: url)
+    }
+
+    /// Commit the intentional silence interval before removing files. Protect
+    /// any existing user/model evidence and re-check state/hash under the write lock.
+    func discardVerifiedSilence(_ id: String, expectedHash: String, audit: String) throws -> Bool {
+        guard UUID(uuidString: id) != nil,
+              let row = try rows("SELECT relative_path,started_ms,ended_ms,source FROM segments WHERE id=? AND state='sealed' AND sha256=?", [id, expectedHash]).first,
+              let relative = row["relative_path"] else { return false }
+        let url = root.appendingPathComponent(relative).resolvingSymlinksInPath()
+        guard url.path.hasPrefix(root.resolvingSymlinksInPath().path + "/Audio/") else { return false }
+        let context = "{\"silence_discarded\":true,\"cleanup_pending\":true,\"silence_evidence\":" + audit + "}"
+        let accepted = try transaction {
+            guard try !rows("SELECT id FROM segments WHERE id=? AND state='sealed' AND sha256=?", [id, expectedHash]).isEmpty else { return false }
+            for query in ["SELECT segment_id FROM transcripts WHERE segment_id=? AND trim(text)!=''", "SELECT segment_id FROM analyses WHERE segment_id=?", "SELECT segment_id FROM corrections WHERE segment_id=?", "SELECT segment_id FROM memory_evidence WHERE segment_id=?", "SELECT id FROM jobs WHERE segment_id=? AND state='leased'"] {
+                if try !rows(query, [id]).isEmpty { return false }
+            }
+            try execute("UPDATE segments SET state='deleted',place=NULL,context_json=? WHERE id=?", [context, id])
+            try execute("UPDATE jobs SET state='cancelled',lease_token=NULL,lease_until_ms=NULL WHERE segment_id=?", [id])
+            try execute("INSERT INTO coverage VALUES (?,?,?,?,?)", [UUID().uuidString, row["started_ms"], row["ended_ms"], row["source"], "silent_audio_discarded"])
+            return true
+        }
+        guard accepted else { return false }
+        try removeAudioFiles(id: id, url: url)
+        try execute("UPDATE segments SET context_json=json_set(context_json,'$.cleanup_pending',json('false')) WHERE id=? AND state='deleted'", [id])
+        return true
+    }
+
+    /// A process exit or filesystem error after the tombstone cannot resurrect
+    /// silence from its PCM journal; retry physical cleanup on the next scan.
+    func resumeSilenceCleanup() throws {
+        for row in try rows("SELECT id,relative_path FROM segments WHERE state='deleted' AND json_extract(context_json,'$.silence_discarded')=1 AND json_extract(context_json,'$.cleanup_pending')=1") {
+            guard let id = row["id"], UUID(uuidString: id) != nil, let relative = row["relative_path"] else { continue }
+            let url = root.appendingPathComponent(relative).resolvingSymlinksInPath()
+            guard url.path.hasPrefix(root.resolvingSymlinksInPath().path + "/Audio/") else { continue }
+            try removeAudioFiles(id: id, url: url)
+            try execute("UPDATE segments SET context_json=json_set(context_json,'$.cleanup_pending',json('false')) WHERE id=? AND state='deleted'", [id])
+        }
+    }
+
+    private func removeAudioFiles(id: String, url: URL) throws {
         if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
         if !id.contains("/") {
             for suffix in [".pcm",".pcm.json",".partial.m4a"] {
