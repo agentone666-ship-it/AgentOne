@@ -60,7 +60,7 @@ try {
   const client=new MCPClient(join(app,'Contents/Resources/agentone-memory/server.mjs'),root);
   try {
     await client.initialize();
-    assert.equal((await client.request('tools/list')).tools.length,9);
+    assert.equal((await client.request('tools/list')).tools.length,11);
     assert.equal((await client.call('get_capture_status')).capture.state,'not_started');
     assert.equal((await client.call('search_memory')).total_matches,0);
   } finally {await client.close()}

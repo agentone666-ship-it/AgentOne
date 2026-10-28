@@ -150,13 +150,21 @@ public final class MemoryDatabase: @unchecked Sendable {
               row["state"] != "recording",let relative=row["relative_path"] else { throw CaptureFailure.message("该片段仍在写入或不存在") }
         let url=root.appendingPathComponent(relative).resolvingSymlinksInPath()
         guard url.path.hasPrefix(root.resolvingSymlinksInPath().path + "/Audio/") else { throw CaptureFailure.message("音频路径无效") }
+        let discussions=try rows("SELECT conversation_id FROM conversation_segments WHERE segment_id=?",[id]).compactMap {$0["conversation_id"]}
         try transaction {
+            for discussion in discussions {
+                try execute("UPDATE conversations SET state='superseded',preview_text='',transcript_text='' WHERE id=?",[discussion])
+            }
             try execute("UPDATE segments SET state='deleted',place=NULL,context_json='{}' WHERE id=?",[id])
             try execute("UPDATE jobs SET state='cancelled',lease_token=NULL,lease_until_ms=NULL WHERE segment_id=?",[id])
             try execute("UPDATE memories SET status='invalidated',title='',text='',entities_json='[]',input_digest=id WHERE id IN (SELECT memory_id FROM memory_evidence WHERE segment_id=?)",[id])
             try execute("DELETE FROM memory_evidence WHERE memory_id IN (SELECT id FROM memories WHERE status='invalidated')")
             try execute("DELETE FROM meta WHERE instr(key,?)=1",["local_label:"+id+":"])
             for table in ["transcripts","analyses","corrections"] { try execute("DELETE FROM \(table) WHERE segment_id=?",[id]) }
+        }
+        for discussion in discussions where discussion.hasPrefix("conversation-") && discussion.allSatisfy({$0.isLetter || $0.isNumber || $0 == "-"}) {
+            let playback=root.appendingPathComponent("ConversationPlayback").appendingPathComponent(discussion)
+            if FileManager.default.fileExists(atPath:playback.path) {try FileManager.default.removeItem(at:playback)}
         }
         try removeAudioFiles(id: id, url: url)
     }
@@ -172,7 +180,7 @@ public final class MemoryDatabase: @unchecked Sendable {
         let context = "{\"silence_discarded\":true,\"cleanup_pending\":true,\"silence_evidence\":" + audit + "}"
         let accepted = try transaction {
             guard try !rows("SELECT id FROM segments WHERE id=? AND state='sealed' AND sha256=?", [id, expectedHash]).isEmpty else { return false }
-            for query in ["SELECT segment_id FROM transcripts WHERE segment_id=? AND trim(text)!=''", "SELECT segment_id FROM analyses WHERE segment_id=?", "SELECT segment_id FROM corrections WHERE segment_id=?", "SELECT segment_id FROM memory_evidence WHERE segment_id=?", "SELECT id FROM jobs WHERE segment_id=? AND state='leased'"] {
+            for query in ["SELECT segment_id FROM transcripts WHERE segment_id=? AND trim(text)!=''", "SELECT segment_id FROM analyses WHERE segment_id=?", "SELECT segment_id FROM corrections WHERE segment_id=?", "SELECT segment_id FROM memory_evidence WHERE segment_id=?", "SELECT segment_id FROM conversation_segments WHERE segment_id=?", "SELECT id FROM jobs WHERE segment_id=? AND state='leased'"] {
                 if try !rows(query, [id]).isEmpty { return false }
             }
             try execute("UPDATE segments SET state='deleted',place=NULL,context_json=? WHERE id=?", [context, id])

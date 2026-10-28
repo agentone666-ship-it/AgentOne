@@ -5,7 +5,7 @@ import Foundation
 import Darwin
 
 @main struct AudioHarness {
-    static func main() throws {
+    @MainActor static func main() async throws {
         let args = CommandLine.arguments
         let explicitRoot = args.firstIndex(of: "--home").flatMap { $0 + 1 < args.count ? URL(fileURLWithPath: args[$0 + 1]) : nil }
         let root = explicitRoot ?? FileManager.default.temporaryDirectory.appendingPathComponent("agentone-audio-harness-\(UUID().uuidString)")
@@ -63,6 +63,33 @@ import Darwin
             guard seconds > 0.85,seconds < 1.2,row["sha256"]?.count == 64,row["state"] == "sealed" else { throw CaptureFailure.message("最终音频文件验证失败") }
         }
         guard rows.allSatisfy({$0["source"]=="mixed"}),rows[0]["ended_ms"]==rows[1]["started_ms"] else {throw CaptureFailure.message("混合时间轴不连续")}
+        if args.contains("--conversation-check") {
+            for (index,row) in rows.enumerated() {
+                let text=index==0 ? "我们先讨论完整需求，再评估方案。":"只是提议，下一次确认后再执行。"
+                let words:[[String:Any]]=[["start_ms":100,"end_ms":800,"text":text]]
+                let encoded=String(decoding:try JSONSerialization.data(withJSONObject:words),as:UTF8.self)
+                try database.execute("INSERT INTO transcripts VALUES (?,1,?,?,'succeeded','synthetic-conversation-fixture-not-ASR',?)",[row["id"],text,encoded,MemoryDatabase.now])
+            }
+            let memory=ConversationMemory(database:database)
+            try memory.refresh(now:Int64(Date().addingTimeInterval(1000).timeIntervalSince1970*1000),force:true)
+            guard let discussion=try memory.recent().first,let id=discussion["id"],discussion["segment_count"]=="2",discussion["missing_ms"]=="0" else {throw CaptureFailure.message("整场归并失败")}
+            let playback=try await ConversationPlayback.export(id:id,database:database)
+            let file=try AVAudioFile(forReading:playback)
+            let seconds=Double(file.length)/file.processingFormat.sampleRate
+            guard abs(seconds-1.9)<0.15 || abs(seconds-2)<0.15 else {throw CaptureFailure.message("整场回放时长不连续")}
+            // Decode samples on each side of the original file boundary;
+            // a duration-only check could accept an empty/silent second half.
+            for fraction in [0.25,0.75] {
+                file.framePosition=AVAudioFramePosition(Double(file.length)*fraction)
+                let pcm=AVAudioPCMBuffer(pcmFormat:file.processingFormat,frameCapacity:4096)!
+                try file.read(into:pcm)
+                guard pcm.frameLength>0,let lane=pcm.floatChannelData?[0] else {throw CaptureFailure.message("整场回放采样不可读")}
+                let energy=(0..<Int(pcm.frameLength)).reduce(0.0) { $0+Double(lane[$1]*lane[$1]) }/Double(pcm.frameLength)
+                guard energy>0.0001 else {throw CaptureFailure.message("整场回放丢失跨分片音频")}
+            }
+            print("{\"fixture\":true,\"conversation\":true,\"segments\":2,\"continuous_playback_seconds\":\(seconds)}")
+            return
+        }
         let result: [String:Any] = ["fixture":true,"segments":2,"sources":["mixed"],"inputs":["system_audio","microphone"],"checks":["real AAC encoding","rotation","one mixed stream","host-timestamp alignment","different input sample rates","readable final files","source hashes","pending ASR jobs"]]
         print(String(decoding: try JSONSerialization.data(withJSONObject: result,options: [.sortedKeys]),as: UTF8.self))
     }

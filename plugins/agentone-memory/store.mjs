@@ -86,7 +86,12 @@ export class MemoryStore {
     };
   }
   recall(args) { return recallContext(this,args); }
-  bundle(args) { return contextBundle(this,args); }
+  bundle(args) {
+    const result=contextBundle(this,args);
+    result.whole_conversations=this.db.prepare("SELECT c.id conversation_id,c.state,c.segment_count,c.missing_ms FROM conversation_segments m JOIN conversations c ON c.id=m.conversation_id WHERE m.segment_id=? AND c.state<>'superseded'").all(args.segment_id);
+    result.whole_scene_instruction='When whole_conversations is present, read every get_conversation_evidence page before summarizing the entire discussion; this neighborhood is only a source window.';
+    return result;
+  }
   event(args) { return contextEvent(this,args); }
   search(args) {
     const clauses = ["s.state='sealed'"];

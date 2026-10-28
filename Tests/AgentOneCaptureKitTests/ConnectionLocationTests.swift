@@ -51,7 +51,7 @@ struct ConnectionLocationTests {
         try FileManager.default.moveItem(at:plugin,to:moved)
         let installed=AgentConnectionPackage(resources:moved,memoryRoot:memory,node:node)
         let count=try await Task.detached {try installed.connectionCheck()}.value
-        #expect(count==9)
+        #expect(count==11)
         #expect(try db.rows("SELECT * FROM meta WHERE key='last_agent_connection'").isEmpty)
         #expect(try db.rows("SELECT * FROM segments").isEmpty)
     }

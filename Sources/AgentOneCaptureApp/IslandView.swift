@@ -8,6 +8,8 @@ struct IslandView: View {
     var onExpand: (() -> Void)? = nil
     @State private var tab = IslandTab.capture
     @State private var showEvents = false
+    @State private var showAudioChunks = false
+    @State private var selectedConversation: [String:String]?
     @State private var expandedEventID: String?
     private let accent = Color(red: 0.55,green: 0.9,blue: 0.84)
     private var status: String { model.demo ? "界面演示" : model.hasError || !model.inputWarning.isEmpty ? "需要留意" : model.recording ? (model.automaticRecording ? "自动记录中" : "记录中") : model.listening ? "听候中" : "未录音" }
@@ -177,6 +179,32 @@ struct IslandView: View {
         }
     }
     private var audioRecallPage: some View {
+        VStack(alignment:.leading,spacing:10) {
+            HStack {
+                Button("整场讨论") {showAudioChunks=false}.foregroundStyle(showAudioChunks ? .white.opacity(0.4):accent)
+                Button("原始分片") {showAudioChunks=true}.foregroundStyle(showAudioChunks ? accent:.white.opacity(0.4))
+                Spacer()
+            }.font(.system(size:10)).buttonStyle(.plain)
+            if showAudioChunks {chunkRecallPage}
+            else {
+                TextField("搜索整场讨论",text:$model.query).textFieldStyle(.plain).font(.system(size:12)).padding(10).background(.white.opacity(0.055),in:RoundedRectangle(cornerRadius:10)).onChange(of:model.query) {_,_ in model.refresh()}
+                ScrollView {
+                    VStack(alignment:.leading,spacing:10) {
+                        if model.conversationRows.isEmpty {Text("等待人声转写；讨论将跨分片自动归并，短暂停顿不会单独成场。").font(.system(size:11)).foregroundStyle(.white.opacity(0.5))}
+                        ForEach(model.conversationRows,id: \.["id"]) { row in
+                            ConversationCard(row:row,busy:model.conversationBusy,onPlay:{model.playConversation(row)},onRead:{selectedConversation=row})
+                        }
+                    }
+                }
+            }
+        }.sheet(isPresented:Binding(get:{selectedConversation != nil},set:{if !$0 {selectedConversation=nil}})) {
+            if let selected=selectedConversation {
+                let current=model.conversationRows.first {$0["id"]==selected["id"]}
+                ConversationDetail(row:current,onPlay:{if let current {model.playConversation(current)}},onTranscribe:{if let current {model.completeConversationTranscription(current)}},onClose:{selectedConversation=nil},busy:model.conversationBusy)
+            }
+        }
+    }
+    private var chunkRecallPage: some View {
         VStack(alignment: .leading,spacing: 12) {
             HStack { Text("最近的声音").font(.system(size: 17,weight: .semibold)); Spacer(); Text("\(model.pending) 项待分析").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4)) }
             HStack { Image(systemName: "magnifyingglass").foregroundStyle(.white.opacity(0.4)); TextField("搜索原话、主题或地点",text: $model.query).textFieldStyle(.plain).onChange(of: model.query) { _,_ in model.refresh() } }

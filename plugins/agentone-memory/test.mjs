@@ -161,7 +161,7 @@ test('real MCP stdio process implements initialization, schemas, errors and reco
   });
   try {
     assert.equal((await call('initialize',{protocolVersion:'2025-06-18'})).result.serverInfo.name,'agentone-memory');
-    assert.equal((await call('tools/list')).result.tools.length,9);
+    assert.equal((await call('tools/list')).result.tools.length,11);
     const invalid=await call('tools/call',{name:'search_memory',arguments:{limit:1.5}});
     assert.equal(invalid.error.code,-32602);
     const injected=await call('tools/call',{name:'submit_memory_analysis',arguments:{job_id:'x',lease_token:'x',source_sha256:f.sha,result:{analysis:{...analyze().analysis,extra:'not allowed'}}}});

@@ -21,7 +21,7 @@ public struct AgentConnectionPackage:Sendable {
         let root=parent.appendingPathComponent("agentone-"+UUID().uuidString.prefix(8)),plugin=root.appendingPathComponent("agentone-memory")
         try fm.createDirectory(at:plugin,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
         do {
-            for file in ["server.mjs","store.mjs","recall.mjs","schema.sql","migrate-v2.sql","README.md","plugin.json",".codex-plugin","skills"] {
+            for file in ["server.mjs","store.mjs","recall.mjs","conversations.mjs","schema.sql","migrate-v2.sql","README.md","plugin.json",".codex-plugin","skills"] {
                 let source=resources.appendingPathComponent(file)
                 guard (try source.resourceValues(forKeys:[.isSymbolicLinkKey])).isSymbolicLink != true else {throw CaptureFailure.message("插件源路径不可信")}
                 try fm.copyItem(at:source,to:plugin.appendingPathComponent(file))
