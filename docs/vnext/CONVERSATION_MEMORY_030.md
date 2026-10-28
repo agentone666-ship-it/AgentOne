@@ -16,7 +16,7 @@ Implemented whole-discussion organization, continuous derived playback and bound
 ## CHANGES
 
 - Add source-backed conversations and ordered membership to the existing additive v2 schema. Pending transcripts, source gaps and superseded groups remain explicit. Preserve complete boundary chunks even when old ASR retained only their tails.
-- Default recall to discussion cards with continuous playback and a whole transcript. Original storage chunks remain available. Old Apple transcripts can be queued for versioned re-transcription.
+- Default recall to discussion cards with continuous playback and a whole transcript. Open whole playback explicitly in QuickTime rather than the default music application. Original storage chunks remain available. Old Apple transcripts can be queued for versioned re-transcription.
 - Export derived M4A using absolute source timestamps; verify source hashes before export, recheck source state afterward, validate readable media and retain only the latest derived export. Preserve missing time as silence. Deleting a source invalidates its discussion and removes derived playback.
 - Decode each source sequentially, then recognize overlapping 24-second PCM windows with a 22-second stride. Reconcile rolling partial/final snapshots and overlap timestamps instead of accepting only a minute's final recognition snapshot.
 - Expose read-only `list_conversations` and paginated `get_conversation_evidence` through the existing MCP/plugin. Require all evidence pages for whole-discussion interpretation. Ship no additional Agent runtime or summary service.

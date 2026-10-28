@@ -434,7 +434,8 @@ import SwiftUI
                 let url=try await ConversationPlayback.export(id:id,database:database)
                 if Int(row["missing_ms"] ?? "0") ?? 0 > 250 {message="本场原音有缺口，回放中的缺口以静音呈现"}
                 else {message="整场回放已生成；底层原音保持不变"}
-                NSWorkspace.shared.open(url)
+                guard let player=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.apple.QuickTimePlayerX") else {throw CaptureFailure.message("系统播放器不可用；整场回放已保存在 Memory 目录")}
+                _ = try await NSWorkspace.shared.open([url],withApplicationAt:player,configuration:NSWorkspace.OpenConfiguration())
             } catch {message=error.localizedDescription}
         }
     }
