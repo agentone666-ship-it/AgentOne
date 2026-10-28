@@ -78,6 +78,7 @@ import SwiftUI
         service?.onFailure = { [weak self] message in
             guard let self else { return }
             self.hasError = true
+            if self.service?.isIndependentRecorder==true {self.message=message;return}
             // Keep automatic intent for the next launch; do not loop on disk/device failures.
             if !self.automaticRecording { self.desiredRecording = false; UserDefaults.standard.set(false,forKey: "vNext.captureDesired") }
             Task { await self.stop(reason: "stream_error"); self.message = message }
@@ -109,7 +110,7 @@ import SwiftUI
             while !Task.isCancelled {
                 guard let self else { return }
                 self.refresh()
-                do { try self.service?.heartbeat() } catch { self.hasError = true; self.desiredRecording = false; UserDefaults.standard.set(false,forKey: "vNext.captureDesired"); await self.stop(reason: "storage_error"); self.message = "Memory 状态写入失败，已停止录音" }
+                do { try self.service?.heartbeat() } catch {self.hasError=true;self.message="采集控制状态暂不可用，请检查 Memory 存储"}
                 if let worker = self.worker {Task {await worker.runNext()}}
                 if let labeler=self.labeler {Task {await labeler.runNext {text in await self.laya.classifyTranscript(text)};self.labelStatus=labeler.status}}
                 do { try await Task.sleep(for: .seconds(3)) } catch { return }
@@ -121,6 +122,11 @@ import SwiftUI
         metering=Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else {return}
+                if !self.busy,self.service?.externalPauseRequested==true,self.desiredRecording {
+                    self.desiredRecording=false;UserDefaults.standard.set(false,forKey:"vNext.captureDesired")
+                    self.hasError=false
+                    self.message="已通过系统停止录音；点击恢复才会继续"
+                }
                 let active=self.service?.isRecording == true
                 if self.listening != active {self.listening=active}
                 let saving=active && (self.service?.decisionStatus.snapshot.saving ?? false)
@@ -225,14 +231,18 @@ import SwiftUI
     }
 
     func prepareForExit() async {
-        desiredRecording = false // Cancel an in-flight permission/start request.
         polling?.cancel();metering?.cancel();decisions?.cancel();laya.stop()
-        await stop(reason: "application_exit")
+        if service?.isIndependentRecorder==true {eventService?.stop();locationService.stop();try? service?.heartbeat()}
+        else {
+            desiredRecording=false // Cancel only an in-process capture start.
+            await stop(reason:"application_exit")
+        }
         worker?.releaseOwnLeases()
     }
 
     private func resumeAfterSuspension(reason: String) async {
         if reason == "sleep" { sleeping = false } else { locked = false }
+        if service?.externalPauseRequested==true {desiredRecording=false;return}
         if desiredRecording && !suspended { await start(prompts: false) }
     }
 
@@ -379,7 +389,12 @@ import SwiftUI
         updateMetadata()
         systemReceiving = listening && (service?.activity.hasSamples(source: "system_audio") ?? false)
         microphoneReceiving = listening && (service?.activity.hasSamples(source: "microphone") ?? false)
-        inputWarning = listening ? service?.microphoneWarning ?? "":""
+        let warning=desiredRecording && !suspended ? service?.microphoneWarning ?? "":""
+        if inputWarning != warning {
+            inputWarning=warning
+            if !warning.isEmpty,!busy {expanded=true;pinned=true}
+        }
+        if hasError,message.hasPrefix("自动记录尚未开始："),service?.isRecording==true,warning.isEmpty {hasError=false;message="后台采集已恢复，系统声音与 Mac 内置麦克风持续保存"}
         systemHasSound = listening && (service?.activity.hasSound(source: "system_audio") ?? false)
         microphoneHasSound = listening && (service?.activity.hasSound(source: "microphone") ?? false)
         do {
@@ -504,7 +519,7 @@ import SwiftUI
             Button("展开灵动岛") { delegate.expandIsland() }
             Button("暂停录音") { CaptureModel.shared.pauseRecording() }
             Divider()
-            Button("退出 AgentOne") { NSApp.terminate(nil) }
+            Button("退出灵动岛（后台继续录音）") { NSApp.terminate(nil) }
         }
     }
 }

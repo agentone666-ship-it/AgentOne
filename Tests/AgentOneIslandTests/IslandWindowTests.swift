@@ -86,7 +86,8 @@ private struct FixtureView: View {
         let now = ProcessInfo.processInfo.systemUptime + 2
         controller.samplePointer(at: top,now: now)
         controller.samplePointer(at: top,now: now+0.2)
-        try await Task.sleep(for: .milliseconds(300))
+        let expandDeadline=Date().addingTimeInterval(2)
+        while controller.panel.frame != geometry.window(expanded:true),Date()<expandDeadline {try await Task.sleep(for:.milliseconds(25))}
         #expect(model.expanded)
         #expect(controller.panel.frame == geometry.window(expanded: true))
         // Moving from the camera cutout down into the controls must keep it open.
@@ -100,7 +101,8 @@ private struct FixtureView: View {
         controller.pinned = false
         controller.samplePointer(at: outside,now: now+4)
         controller.samplePointer(at: outside,now: now+4.7)
-        try await Task.sleep(for: .milliseconds(300))
+        let collapseDeadline=Date().addingTimeInterval(2)
+        while controller.panel.frame != geometry.window(expanded:false),Date()<collapseDeadline {try await Task.sleep(for:.milliseconds(25))}
         #expect(!model.expanded)
         #expect(controller.panel.frame == geometry.window(expanded: false))
     }

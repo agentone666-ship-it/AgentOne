@@ -3,8 +3,21 @@ import AVFoundation
 import CoreMedia
 import Foundation
 import Testing
+import AppKit
 
 struct PreservationTests {
+    @MainActor @Test func nativePointerCallbackCanBeDeliveredOutsideMainActor() async throws {
+        let delivered:Bool=await withCheckedContinuation { continuation in
+            let handler=makePassivePointerHandler(sampler:PassivePointerEventSampler()) { signal in
+                continuation.resume(returning:signal.kind == .primaryClick)
+            }
+            DispatchQueue.global().async {
+                guard let event=NSEvent.mouseEvent(with:.leftMouseDown,location:.zero,modifierFlags:[],timestamp:0,windowNumber:0,context:nil,eventNumber:0,clickCount:1,pressure:1) else {continuation.resume(returning:false);return}
+                handler(event)
+            }
+        }
+        #expect(delivered)
+    }
     @Test func missingMicrophoneCallbacksRecoverWithBoundedRetriesAndSilenceIsHealthy() {
         var policy=MicrophoneRecoveryPolicy(now:0)
         let retry=[5.0,6,7,12,18,24].map {policy.observe(hasSamples:false,now:$0)}

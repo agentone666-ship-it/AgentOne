@@ -18,12 +18,14 @@ public final class MixedAudioWriter: @unchecked Sendable {
     private let host: Double
     private let sessionID: String
     private let segmentSeconds: Double
+    private let discardSilence: Bool
     private let metadata: @Sendable () -> (String?,String)
     private let onActivity: @Sendable (AudioActivityReading?) -> Void
     private let decisionStatus: RecordingDecisionStatus?
     private var blocks: [Int64:Block] = [:]
     private var cursor: Int64?
     private var latest: Int64 = 0
+    private var inputEnds:[String:Int64]=[:]
     private var written = false
     private var closed = false
     private var activityLabel="unknown"
@@ -50,7 +52,7 @@ public final class MixedAudioWriter: @unchecked Sendable {
     private var sourceFrames: [String:Int64] = [:]
     private var unavailableFrames: [String:Int64] = [:]
     private let format = AVAudioFormat(standardFormatWithSampleRate:sampleRate,channels:2)!
-    private lazy var writer = AudioTrackWriter(database:database,source:"mixed",sessionID:sessionID,wallAnchor:wall,hostAnchor:host,segmentSeconds:segmentSeconds,
+    private lazy var writer = AudioTrackWriter(database:database,source:"mixed",sessionID:sessionID,wallAnchor:wall,hostAnchor:host,segmentSeconds:segmentSeconds,discardSilence:discardSilence,
         finishingContext: { [weak self] in self?.mixingContext() ?? "{}" },metadata:metadata)
     private lazy var gate = decisionStatus.map { status in RecordingGate(status:status,
         write:{[unowned self] buffer,pts in try self.writer.append(buffer,presentationSeconds:pts)},
@@ -63,8 +65,9 @@ public final class MixedAudioWriter: @unchecked Sendable {
     }
     public var sealedCount: Int { writer.sealedCount }
 
-    public init(database:MemoryDatabase,sessionID:String,wallAnchor:Date,hostAnchor:Double,segmentSeconds:Double = 60,decisionStatus:RecordingDecisionStatus? = nil,onActivity:@escaping @Sendable (AudioActivityReading?) -> Void = {_ in},metadata:@escaping @Sendable () -> (String?,String) = {(nil,"{}")}) {
+    public init(database:MemoryDatabase,sessionID:String,wallAnchor:Date,hostAnchor:Double,segmentSeconds:Double = 60,discardSilence:Bool = false,decisionStatus:RecordingDecisionStatus? = nil,onActivity:@escaping @Sendable (AudioActivityReading?) -> Void = {_ in},metadata:@escaping @Sendable () -> (String?,String) = {(nil,"{}")}) {
         self.onActivity=onActivity;self.decisionStatus=decisionStatus;self.database=database;self.sessionID=sessionID;wall=wallAnchor;host=hostAnchor;self.segmentSeconds=segmentSeconds;self.metadata=metadata
+        self.discardSilence=discardSilence
     }
     public func consume(_ sample:CMSampleBuffer,source:String) throws {
         if let packet=try AudioTrackWriter.decodePCM(sample) {try append(packet.buffer,source:source,presentationSeconds:packet.presentationSeconds)}
@@ -136,10 +139,23 @@ public final class MixedAudioWriter: @unchecked Sendable {
             blocks[key]=block;index += Int64(count)
         }
         sourceFrames[source,default:0] += end-first
+        inputEnds[source]=max(inputEnds[source] ?? 0,end)
         latest=max(latest,end)
     }
 
     /// Release frames only after the jitter window; absent inputs are zero, never time-compressed.
+    public func flushAvailable(throughHostSeconds cutoff:Double) throws {
+        // A busy writer queue must not advance its cursor past PCM callbacks still queued
+        // behind the timer. The packet watermark advances only after append has consumed data.
+        guard latest>0 else {return}
+        // Let both input queues reach a frame before sealing it. When an input
+        // actually stalls for >3 seconds, continue the other stream with an
+        // explicit missing-input interval rather than stop preserving audio.
+        let active=inputEnds.values.filter {latest-$0<Int64(Self.sampleRate*3)}
+        let watermark=active.min() ?? latest
+        try flush(throughHostSeconds:min(cutoff,host+Double(watermark)/Self.sampleRate-Self.latency))
+    }
+    public func checkpoint() throws {try writer.finish()}
     public func flush(throughHostSeconds cutoff:Double) throws {
         guard !closed,let start=cursor,cutoff.isFinite else {return}
         let end=Int64(floor((cutoff-host)*Self.sampleRate+0.001))
@@ -171,9 +187,12 @@ public final class MixedAudioWriter: @unchecked Sendable {
     public func finish(throughHostSeconds cutoff:Double? = nil) throws {
         guard !closed else {return}
         if cursor != nil {
-            let end=max(latest,max(cursor ?? 0,cutoff.map {Int64(floor(($0-host)*Self.sampleRate))} ?? latest))
+            let end=max(latest,cursor ?? 0)
             try flush(throughHostSeconds:host+Double(end)/Self.sampleRate)
             for (source,start) in missingStarts {try gap(source:source,start:start,end:end)}
+            if let cutoff,cutoff>host+Double(end)/Self.sampleRate+0.01 {
+                try database.addGap(started:wall.addingTimeInterval(Double(end)/Self.sampleRate),ended:wall.addingTimeInterval(cutoff-host),source:"all",reason:"inputs_stopped_before_close")
+            }
         }
         if let gate {try gate.finish(now:host+Double(cursor ?? 0)/Self.sampleRate)} else {try writer.finish()};closed=true;blocks.removeAll();missingStarts.removeAll()
         try database.execute("INSERT INTO meta VALUES ('mixed_input_stats',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[mixingContext()])

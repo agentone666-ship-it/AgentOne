@@ -2,18 +2,37 @@ import AgentOneCaptureKit
 import AVFoundation
 import CoreMedia
 import Foundation
+import Darwin
 
 @main struct AudioHarness {
     static func main() throws {
         let args = CommandLine.arguments
         let explicitRoot = args.firstIndex(of: "--home").flatMap { $0 + 1 < args.count ? URL(fileURLWithPath: args[$0 + 1]) : nil }
         let root = explicitRoot ?? FileManager.default.temporaryDirectory.appendingPathComponent("agentone-audio-harness-\(UUID().uuidString)")
+        if args.contains("--recover-journal") {
+            let database=try MemoryDatabase(root:root);try database.recoverInterruptedSegments()
+            let rows=try database.rows("SELECT * FROM segments WHERE state='sealed'")
+            guard rows.count==1,let id=rows.first?["id"],let context=rows.first?["context_json"],context.contains("mixed_pcm_write_ahead_journal") else {throw CaptureFailure.message("PCM 恢复失败")}
+            let audio=try AVAudioFile(forReading:database.verifiedAudioURL(id))
+            guard abs(audio.length-96000)<2048,try database.rows("SELECT * FROM jobs WHERE stage='transcribe'").count==1 else {throw CaptureFailure.message("恢复音频帧数或任务错误")}
+            print("{\"fixture\":true,\"crash_recovery\":true,\"frames\":\(audio.length)}");return
+        }
         if FileManager.default.fileExists(atPath: root.path), !(try FileManager.default.contentsOfDirectory(atPath: root.path)).isEmpty {
             throw CaptureFailure.message("音频 Harness 需要空白测试目录，不能使用真实 Memory 目录")
         }
         defer { if explicitRoot == nil { try? FileManager.default.removeItem(at: root) } }
         let database = try MemoryDatabase(root: root)
         let host = CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()))
+        if args.contains("--crash-journal") {
+            let writer=AudioTrackWriter(database:database,source:"mixed",sessionID:"crash-fixture",wallAnchor:Date(),hostAnchor:host)
+            let format=AVAudioFormat(standardFormatWithSampleRate:48000,channels:2)!
+            for block in 0..<20 {
+                let buffer=AVAudioPCMBuffer(pcmFormat:format,frameCapacity:4800)!;buffer.frameLength=4800
+                for channel in 0..<2 {for frame in 0..<4800 {buffer.floatChannelData![channel][frame]=0.15*sin(Float(block*4800+frame)*2 * .pi*440/48000)}}
+                try writer.append(buffer,presentationSeconds:host+Double(block)/10)
+            }
+            Darwin._exit(77) // Deliberately skip all Swift/AVAudioFile destructors.
+        }
         let wall = Date(timeIntervalSince1970: 1_761_480_000)
         let writer=MixedAudioWriter(database:database,sessionID:"synthetic-mixed",wallAnchor:wall,hostAnchor:host,segmentSeconds:1,metadata:{("合成测试地点","{\"synthetic\":true}")})
         for index in 0..<4 {

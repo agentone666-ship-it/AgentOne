@@ -59,6 +59,11 @@ public struct CaptureStartEvidence:Sendable {
     public let readySources:[String]
 }
 
+public struct AudioInputTelemetry:Codable,Sendable {
+    public let rmsDBFS:Double
+    public let observedUptime:Double
+}
+
 public final class CaptureActivityMeter: @unchecked Sendable {
     private let lock = NSLock()
     private var lastSound: [String: TimeInterval] = [:]
@@ -71,6 +76,10 @@ public final class CaptureActivityMeter: @unchecked Sendable {
     private var buckets:[String:[Bucket]]=[:]
     private static let startThreshold = -42.0
     public init() {}
+    public func telemetry() -> [String:AudioInputTelemetry] {
+        lock.lock();defer{lock.unlock()}
+        return readings.mapValues {AudioInputTelemetry(rmsDBFS:$0.0,observedUptime:$0.1)}
+    }
     public func observe(_ reading: AudioActivityReading?, source: String, now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
         guard let reading,reading.rmsDBFS.isFinite,now.isFinite,now>=0,now<Double(Int64.max)/5 else {return}
         lock.lock(); defer { lock.unlock() }

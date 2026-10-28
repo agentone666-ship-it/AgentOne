@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync,mkdirSync,readFileSync,existsSync,rmSync } from 'node:fs';
+import { mkdtempSync,mkdirSync,readFileSync,existsSync,rmSync,renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join,resolve } from 'node:path';
 import { MCPClient } from './mcp_client.mjs';
@@ -21,7 +21,28 @@ try {
   assert.equal(existsSync(join(app,'Contents/Resources/AgentOne_AgentOneApp.bundle')),false);
   assert.equal(readFileSync(join(app,'Contents/Resources/laya-worker.py'),'utf8'),readFileSync('tools/laya-decision/worker.py','utf8'));
   const executable=join(app,'Contents/MacOS/AgentOne');
-  const check=JSON.parse(run(executable,['--self-check']));
+  const recorder=join(app,'Contents/Helpers/AgentOneRecorder.app/Contents/MacOS/AgentOneRecorder');
+  assert.equal(existsSync(recorder),true);
+  const packagedEnv={...process.env,AGENTONE_PACKAGED_RESOURCES_ONLY:'1'};
+  const recorderCheck=JSON.parse(run(recorder,['--self-check'],{env:packagedEnv}));
+  assert.equal(recorderCheck.agent_runtime,false);assert.equal(recorderCheck.recording_started,false);
+  assert.equal(recorderCheck.role,'native_audio_recorder');
+  // Negative distribution test: an isolated helper without its resource bundle
+  // must fail even on the original build machine, where SwiftPM's fallback exists.
+  const isolated=join(temporary,'IsolatedRecorder.app');
+  run('ditto',[join(app,'Contents/Helpers/AgentOneRecorder.app'),isolated]);
+  renameSync(join(isolated,'Contents/Resources/AgentOne_AgentOneCaptureKit.bundle'),join(temporary,'hidden-resources.bundle'));
+  run('codesign',['--force','--sign','-',isolated]);
+  const missing=spawnSync(join(isolated,'Contents/MacOS/AgentOneRecorder'),['--self-check'],{encoding:'utf8',timeout:30000,env:packagedEnv});
+  assert.notEqual(missing.status,0,'A packaged helper must not silently use the build-directory resources');
+  assert.match(missing.stderr,/缺少 Memory schema/);
+  const supervisorRoot=join(temporary,'supervisor-fixture');mkdirSync(supervisorRoot);
+  const supervision=JSON.parse(run(recorder,['--supervisor-self-check','--root',supervisorRoot],{env:packagedEnv}));
+  assert.equal(supervision.watchdog_restart,true);assert.equal(supervision.recording_started,false);
+  const pauseRoot=join(temporary,'supervisor-pause-fixture');mkdirSync(pauseRoot);
+  const paused=JSON.parse(run(recorder,['--supervisor-pause-self-check','--root',pauseRoot],{env:packagedEnv}));
+  assert.equal(paused.pause_respected,true);assert.equal(paused.recording_started,false);
+  const check=JSON.parse(run(executable,['--self-check'],{env:packagedEnv}));
   assert.equal(check.agent_runtime,false);assert.equal(check.recording_started,false);assert.equal(check.recording_output,'mixed');assert.equal(check.schema,2);
   assert.deepEqual(check.sources,['system_audio','microphone']);
   const plist=JSON.parse(run('plutil',['-convert','json','-o','-',join(app,'Contents/Info.plist')]));

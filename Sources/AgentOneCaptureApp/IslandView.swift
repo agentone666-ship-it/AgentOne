@@ -98,7 +98,7 @@ struct IslandView: View {
         VStack(alignment: .leading,spacing: 16) {
             HStack {
                 VStack(alignment: .leading,spacing: 6) {
-                    Text(model.recording ? "正在保留今天的声音" : model.listening ? "正在听候新的声音" : model.hasError ? "自动记录需要处理" : "让记忆从这里开始").font(.system(size: 22,weight: .semibold))
+                    Text(!model.inputWarning.isEmpty || model.hasError ? "自动记录需要处理" : model.recording ? "正在保留今天的声音" : model.listening ? "正在听候新的声音" : "让记忆从这里开始").font(.system(size: 22,weight: .semibold))
                     Text("声音、时间、地点，留给未来的你。").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
                 }
                 Spacer()
@@ -106,7 +106,7 @@ struct IslandView: View {
             VStack(alignment:.leading,spacing:12) {
                 HStack {
                     LiveAudioGlyph(levels:model.audioLevels,recording:model.recording,size:20).foregroundStyle(accent)
-                    Text("系统声音 ＋ 麦克风").font(.system(size:13,weight:.medium))
+                    Text("系统声音 ＋ Mac 内置麦克风").font(.system(size:13,weight:.medium))
                     Spacer()
                     Text("合并录音").font(.system(size:10)).foregroundStyle(accent)
                 }
@@ -114,7 +114,7 @@ struct IslandView: View {
                 if model.listening {
                     HStack(spacing:12) {
                         Label(model.systemReceiving ? "电脑声音已接入" : "等待电脑声音",systemImage:"speaker.wave.2")
-                        Label(model.microphoneReceiving ? "麦克风已接入" : "等待麦克风",systemImage:"mic")
+                        Label(model.microphoneReceiving ? "Mac 内置麦克风已接入" : "等待 Mac 内置麦克风",systemImage:"mic")
                     }.font(.system(size:9)).foregroundStyle(.white.opacity(0.4))
                 }
             }.padding(16).frame(maxWidth:.infinity,alignment:.leading).background(.white.opacity(0.055),in:RoundedRectangle(cornerRadius:16))
@@ -229,7 +229,7 @@ struct IslandView: View {
                         Text("持续保全 · 推荐").tag("preserve")
                         Text("智能触发").tag("intelligent")
                     }.pickerStyle(.segmented)
-                    Text(model.captureMode=="preserve" ? "完整保存系统声音和麦克风，安静与模型异常都不会停录；模型只做分段/标签。手动暂停仍有效。":"只在持续声音与模型确认后保存，可能漏掉轻声或有停顿的会议；不适合必须完整保留的场景。").font(.system(size:10)).foregroundStyle(.white.opacity(0.45))
+                    Text(model.captureMode=="preserve" ? "持续采集系统声音和 Mac 内置麦克风；模型只做分段和标签。封口后自动清理整段纯静音，有声片段及其中停顿保留。":"只在持续声音与模型确认后保存，可能漏掉轻声或有停顿的会议；不适合必须完整保留的场景。").font(.system(size:10)).foregroundStyle(.white.opacity(0.45))
                     Toggle("自动记录声音",isOn: Binding(get: {model.automaticRecording},set: {model.setAutomaticRecording($0)}))
                     Text(model.captureMode=="preserve" ? "授权后自动持续保存；手动暂停后保持暂停，模型不会阻止保全原音。":"先听候；持续声音和模型确认后保存，仍可能漏录。").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
                     Toggle("登录后自动启动",isOn: Binding(get: {model.autoResume},set: {model.setAutoResume($0)}))

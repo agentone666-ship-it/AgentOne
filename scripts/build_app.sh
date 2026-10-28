@@ -24,16 +24,21 @@ trap cleanup EXIT
 
 cd "$project_dir"
 swift build -c "$configuration" --product AgentOne
+swift build -c "$configuration" --product AgentOneRecorder
 
 binary_path="$(swift build -c "$configuration" --show-bin-path)/AgentOne"
 mkdir -p "$contents_dir/MacOS" "$contents_dir/Resources"
 cp "$binary_path" "$contents_dir/MacOS/AgentOne"
+recorder_app="$contents_dir/Helpers/AgentOneRecorder.app"
+mkdir -p "$recorder_app/Contents/MacOS" "$recorder_app/Contents/Resources"
+cp "$(dirname "$binary_path")/AgentOneRecorder" "$recorder_app/Contents/MacOS/AgentOneRecorder"
 
 # Only the new CaptureKit resource bundle ships; the legacy Agent runtime and
 # its LifeForm/chat resources stay out of the default distribution.
 resource_bundle="$(swift build -c "$configuration" --show-bin-path)/AgentOne_AgentOneCaptureKit.bundle"
 if [[ -d "$resource_bundle" ]]; then
     cp -R "$resource_bundle" "$contents_dir/Resources/"
+    cp -R "$resource_bundle" "$recorder_app/Contents/Resources/"
 fi
 
 plugin_resources="$contents_dir/Resources/agentone-memory"
@@ -92,6 +97,14 @@ PLIST
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $app_version" "$contents_dir/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" "$contents_dir/Info.plist"
 
+# A distinct bundle identity keeps the headless worker out of the UI app's
+# LaunchServices/Accessibility identity when the island exits and reopens.
+cp "$contents_dir/Info.plist" "$recorder_app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable AgentOneRecorder" "$recorder_app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier life.agentone.recorder" "$recorder_app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleName AgentOneRecorder" "$recorder_app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName AgentOne Recorder" "$recorder_app/Contents/Info.plist"
+
 # Signing directly inside an iCloud Drive workspace is unreliable because the
 # File Provider can immediately re-attach FinderInfo/resource-fork metadata to
 # an .app directory. Build and sign in a clean local staging directory, then
@@ -99,6 +112,7 @@ PLIST
 xattr -cr "$app_dir"
 signing_identity="${AGENTONE_SIGNING_IDENTITY:--}"
 if [[ "$signing_identity" == "-" ]]; then
+    codesign --force --sign - --requirements '=designated => identifier "life.agentone.recorder"' "$recorder_app" >/dev/null
     # An ordinary ad-hoc signature derives its designated requirement from the
     # executable CDHash. That hash changes on every build, so macOS TCC treats
     # each locally-built AgentOne as a different app and silently disconnects
@@ -108,12 +122,12 @@ if [[ "$signing_identity" == "-" ]]; then
     # AGENTONE_SIGNING_IDENTITY to a real Developer ID identity instead.
     codesign \
         --force \
-        --deep \
         --sign - \
         --requirements '=designated => identifier "life.agentone.desktop"' \
         "$app_dir" >/dev/null
 else
-    codesign --force --deep --sign "$signing_identity" "$app_dir" >/dev/null
+    codesign --force --sign "$signing_identity" "$recorder_app" >/dev/null
+    codesign --force --sign "$signing_identity" "$app_dir" >/dev/null
 fi
 codesign --verify --deep --strict "$app_dir"
 

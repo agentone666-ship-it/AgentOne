@@ -26,10 +26,9 @@ import Foundation
             Task { @MainActor in self?.draft=nil;self?.poll() }
         }
         let sampler=self.sampler
-        pointerMonitor=NSEvent.addGlobalMonitorForEvents(matching:[.leftMouseDown,.rightMouseDown,.scrollWheel]) { [weak self] event in
-            guard let signal=sampler.sample(event) else { return }
+        pointerMonitor=NSEvent.addGlobalMonitorForEvents(matching:[.leftMouseDown,.rightMouseDown,.scrollWheel], handler:makePassivePointerHandler(sampler:sampler) { [weak self] signal in
             Task { @MainActor in self?.pointer(signal) }
-        }
+        })
         attachKeyboardIfAllowed()
         let timer=Timer(timeInterval:5,repeats:true) { [weak self] _ in
             Task { @MainActor in self?.attachKeyboardIfAllowed();self?.poll() }
