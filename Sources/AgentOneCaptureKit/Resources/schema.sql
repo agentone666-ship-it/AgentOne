@@ -71,3 +71,18 @@ CREATE TABLE IF NOT EXISTS context_events (
 );
 CREATE INDEX IF NOT EXISTS event_time ON context_events(started_ms,ended_ms);
 CREATE TABLE IF NOT EXISTS event_import_state (source_ref TEXT PRIMARY KEY, sha256 TEXT NOT NULL, synced_ms INTEGER NOT NULL);
+
+-- Logical discussions span immutable physical audio chunks. Additive schema v2 extension.
+CREATE TABLE IF NOT EXISTS conversations (
+ id TEXT PRIMARY KEY, started_ms INTEGER NOT NULL, ended_ms INTEGER NOT NULL,
+ last_speech_ms INTEGER NOT NULL, state TEXT NOT NULL,
+ input_digest TEXT NOT NULL, preview_text TEXT NOT NULL, transcript_text TEXT NOT NULL,
+ segment_count INTEGER NOT NULL, pending_count INTEGER NOT NULL,
+ missing_ms INTEGER NOT NULL, updated_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS conversation_segments (
+ conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+ segment_id TEXT NOT NULL REFERENCES segments(id), source_hash TEXT NOT NULL,
+ transcript_revision INTEGER NOT NULL, ordinal INTEGER NOT NULL,
+ PRIMARY KEY(conversation_id,segment_id)
+);

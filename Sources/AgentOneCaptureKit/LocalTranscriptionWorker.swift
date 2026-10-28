@@ -1,3 +1,4 @@
+@preconcurrency import AVFoundation
 import Foundation
 @preconcurrency import Speech
 
@@ -43,6 +44,12 @@ public struct AudioUtterance: Codable, Sendable {
         return result
     }
 
+    public func recognizeAuthorizedAudio(_ source:URL) async throws -> (String,[AudioUtterance]) {
+        guard SFSpeechRecognizer.authorizationStatus() == .authorized else {throw CaptureFailure.message("语音识别未授权")}
+        guard let recognizer=SFSpeechRecognizer(locale:Locale(identifier:localeIdentifier)),recognizer.supportsOnDeviceRecognition,recognizer.isAvailable else {throw CaptureFailure.message("本机识别模型不可用")}
+        return try await transcribe(source,with:recognizer)
+    }
+
     public func runNext() async {
         guard enabled, !running else { return }
         guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
@@ -63,8 +70,8 @@ public struct AudioUtterance: Codable, Sendable {
         do {
             job = try database.transaction {
                 let now = MemoryDatabase.now
-                guard let row = try database.rows("SELECT j.*,s.relative_path FROM jobs j JOIN segments s ON s.id=j.segment_id WHERE j.stage='transcribe' AND s.state='sealed' AND j.attempts<3 AND (j.state='pending' OR (j.state='leased' AND j.lease_until_ms<?)) AND (j.attempts=0 OR j.updated_ms<?) ORDER BY j.created_ms LIMIT 1", [now,String(Int64(now)! - 60_000)]).first else { return nil }
-                try database.execute("UPDATE jobs SET state='leased',lease_token=?,lease_owner=?,lease_until_ms=?,attempts=attempts+1,updated_ms=? WHERE id=?", [token,ownerID,String(Int64(now)! + 120_000),now,row["id"]])
+                guard let row = try database.rows("SELECT j.*,s.relative_path FROM jobs j JOIN segments s ON s.id=j.segment_id WHERE j.stage='transcribe' AND s.state='sealed' AND j.attempts<3 AND (j.state='pending' OR (j.state='leased' AND j.lease_until_ms<?)) AND (j.attempts=0 OR j.updated_ms<?) ORDER BY CASE WHEN j.input_revision=0 THEN 0 ELSE 1 END,j.created_ms DESC LIMIT 1", [now,String(Int64(now)! - 60_000)]).first else { return nil }
+                try database.execute("UPDATE jobs SET state='leased',lease_token=?,lease_owner=?,lease_until_ms=?,attempts=attempts+1,updated_ms=? WHERE id=?", [token,ownerID,String(Int64(now)! + 600_000),now,row["id"]])
                 return row
             }
             guard let job, let id = job["id"], let segmentID = job["segment_id"] else { return }
@@ -75,7 +82,7 @@ public struct AudioUtterance: Codable, Sendable {
             let accepted = try database.transaction {
                 guard try database.rows("SELECT j.id FROM jobs j JOIN segments s ON s.id=j.segment_id WHERE j.id=? AND j.lease_token=? AND j.state='leased' AND j.lease_until_ms>? AND s.state='sealed' AND s.sha256=j.source_hash", [id,token,MemoryDatabase.now]).count == 1 else { return false }
                 let revision = (Int(try database.rows("SELECT COALESCE(MAX(revision),0) AS revision FROM transcripts WHERE segment_id=?", [segmentID]).first?["revision"] ?? "0") ?? 0) + 1
-                try database.execute("INSERT INTO transcripts VALUES (?,?,?,?,?,?,?)", [segmentID,String(revision),text,encoded,text.isEmpty ? "no_speech" : "succeeded","apple-on-device:\(localeIdentifier)",MemoryDatabase.now])
+                try database.execute("INSERT INTO transcripts VALUES (?,?,?,?,?,?,?)", [segmentID,String(revision),text,encoded,text.isEmpty ? "no_speech" : "succeeded","apple-on-device-windowed-v2:\(localeIdentifier)",MemoryDatabase.now])
                 try database.execute("UPDATE jobs SET state='succeeded',lease_token=NULL,lease_until_ms=NULL,last_error=NULL,updated_ms=? WHERE id=?", [MemoryDatabase.now,id])
                 try database.execute("INSERT OR IGNORE INTO jobs (id,segment_id,stage,source_hash,input_revision,state,created_ms,updated_ms) VALUES (?,?,'analyze',?,?,'pending',?,?)", [UUID().uuidString,segmentID,job["source_hash"],String(revision),MemoryDatabase.now,MemoryDatabase.now])
                 return true
@@ -90,14 +97,28 @@ public struct AudioUtterance: Codable, Sendable {
     }
 
     private func transcribe(_ url: URL, with recognizer: SFSpeechRecognizer) async throws -> (String, [AudioUtterance]) {
+        let directory=FileManager.default.temporaryDirectory.appendingPathComponent("agentone-asr-"+UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at:directory) }
+        let windows=try await Task.detached(priority:.utility) {try BoundedTranscription.windows(for:url,directory:directory)}.value
+        var recognized=[(offset:Int,utterances:[AudioUtterance])]()
+        for window in windows {
+            let (_,utterances)=try await transcribeWindow(window.url,with:recognizer)
+            recognized.append((window.offsetMilliseconds,utterances))
+        }
+        let file=try AVAudioFile(forReading:url)
+        let utterances=BoundedTranscription.merge(recognized,durationMilliseconds:Int(Double(file.length)/file.processingFormat.sampleRate*1000))
+        return (utterances.map(\.text).joined(separator:" "),utterances)
+    }
+
+    private func transcribeWindow(_ url: URL, with recognizer: SFSpeechRecognizer) async throws -> (String, [AudioUtterance]) {
         let request = SFSpeechURLRecognitionRequest(url: url)
         request.requiresOnDeviceRecognition = true
-        request.shouldReportPartialResults = false
+        request.shouldReportPartialResults = true
         return try await withCheckedThrowingContinuation { continuation in
             var finished = false
+            var accumulated=SpeechTranscriptAccumulator()
             recognitionTask = recognizer.recognitionTask(with: request) { @Sendable result, error in
                 let final = result?.isFinal == true
-                let text = result?.bestTranscription.formattedString ?? ""
                 let utterances = result?.bestTranscription.segments.map { segment in
                     AudioUtterance(start_ms: Int(segment.timestamp * 1000), end_ms: Int((segment.timestamp + segment.duration) * 1000), text: segment.substring, speaker_local_id: nil)
                 } ?? []
@@ -106,16 +127,18 @@ public struct AudioUtterance: Codable, Sendable {
                 let errorCode = error.map {($0 as NSError).code} ?? 0
                 let unrecognized = OnDeviceSpeechFailure.noRecognizedSpeech(domain:errorDomain,code:errorCode)
                 Task { @MainActor [weak self] in
-                    guard !finished, final || failed else { return }
+                    guard !finished else { return }
+                    accumulated.ingest(utterances)
+                    guard final || failed else { return }
                     finished = true; self?.timeout?.cancel(); self?.timeout = nil
-                    if final { continuation.resume(returning: (text,utterances)) }
-                    else if unrecognized { continuation.resume(returning: ("",[])) }
+                    if final { continuation.resume(returning: (accumulated.utterances.map(\.text).joined(separator:" "),accumulated.utterances)) }
+                    else if unrecognized && accumulated.utterances.isEmpty { continuation.resume(returning: ("",[])) }
                     else { continuation.resume(throwing: CaptureFailure.message(OnDeviceSpeechFailure.message(domain:errorDomain,code:errorCode))) }
                     self?.recognitionTask = nil
                 }
             }
             timeout = Task { @MainActor [weak self] in
-                do { try await Task.sleep(for: .seconds(75)) } catch { return }
+                do { try await Task.sleep(for: .seconds(45)) } catch { return }
                 guard !finished else { return }
                 finished = true; self?.recognitionTask?.cancel(); self?.recognitionTask = nil
                 continuation.resume(throwing: CaptureFailure.message("本机转写超时"))

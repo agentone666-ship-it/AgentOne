@@ -41,6 +41,8 @@ import SwiftUI
     @Published var pauseOnLock = (UserDefaults.standard.object(forKey: "vNext.pauseOnLock") as? Bool) ?? true
     @Published var query = ""
     @Published var rows: [[String: String]] = []
+    @Published var conversationRows: [[String:String]] = []
+    @Published var conversationBusy = false
     @Published var eventRows: [[String: String]] = []
     @Published var eventCount = 0
     @Published var eventImportStatus = "旧事件待同步"
@@ -56,6 +58,7 @@ import SwiftUI
     let eventService: EventCaptureService?
     let worker: LocalTranscriptionWorker?
     let labeler:LocalTopicLabeler?
+    let conversations:ConversationMemory?
     private var desiredRecording = false
     private var sleeping = false
     private var locked = false
@@ -74,6 +77,7 @@ import SwiftUI
         eventService = db.map { EventCaptureService(database: $0) }
         worker = db.map { LocalTranscriptionWorker(database: $0) }
         labeler=db.map {LocalTopicLabeler(database:$0)}
+        conversations=db.map {ConversationMemory(database:$0)}
         if db == nil { message = "Memory 目录无法打开；录音不会启动。" }
         service?.onFailure = { [weak self] message in
             guard let self else { return }
@@ -415,8 +419,29 @@ import SwiftUI
             ORDER BY s.started_ms DESC LIMIT 12
             """
             rows = try database.rows(sql,[query,query])
+            try conversations?.refresh()
+            conversationRows = try conversations?.recent(query:query) ?? []
             asrStatus = worker?.status ?? "转写服务不可用"
         } catch { message = "Memory 读取失败，请检查目录权限" }
+    }
+
+    func playConversation(_ row: [String:String]) {
+        guard !conversationBusy,let id=row["id"],let database else {return}
+        conversationBusy=true;message="正在生成整场连续回放…"
+        Task {
+            defer {conversationBusy=false}
+            do {
+                let url=try await ConversationPlayback.export(id:id,database:database)
+                if Int(row["missing_ms"] ?? "0") ?? 0 > 250 {message="本场原音有缺口，回放中的缺口以静音呈现"}
+                else {message="整场回放已生成；底层原音保持不变"}
+                NSWorkspace.shared.open(url)
+            } catch {message=error.localizedDescription}
+        }
+    }
+    func completeConversationTranscription(_ row:[String:String]) {
+        guard let id=row["id"],localASR else {message="请先在设置启用本机转写";return}
+        do {let count=try conversations?.retranscribe(id:id) ?? 0;message=count>0 ? "已加入 \(count) 段完整转写；完成后更新整场原文":"本场已使用完整窗口转写";refresh()}
+        catch {message=error.localizedDescription}
     }
 
     func openAudio(_ row: [String:String]) {
@@ -501,6 +526,7 @@ import SwiftUI
 @main struct AgentOneCaptureApp: App {
     @NSApplicationDelegateAdaptor(CaptureAppDelegate.self) private var delegate
     init() {
+        HeadlessSpeechCheck.runIfRequested()
         if CommandLine.arguments.contains("--self-check") {
             do {
                 let root=FileManager.default.temporaryDirectory.appendingPathComponent("agentone-self-check-\(UUID().uuidString)")

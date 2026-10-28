@@ -80,3 +80,9 @@ SQLite 元数据与查询不会只读取最近一天，因此旧记录仍可查�
 0.2.8 自动采集默认先听候，持续声音加模型稳定确认才写盘；未知、加载中或错误不会开启新录音。coverage 的新省略区间为 automatic_wait，历史 laya_wait 保留原义；听候仍需要设备采样与 10 秒内存预录。
 
 0.2.9 默认 continuous_preservation，模型只做活动标记/切片，不控制文件保留。local_label 是绑定来源哈希与转写版本的本机主题预览，可检索但不是已核实事实；宿主的 analyze 队列保持待处理，仍需完整证据分析。新 source.place 使用 context.place_source 区分 core_location 与历史 user_annotation。
+
+## Whole conversations (0.3.0)
+
+`list_conversations` lists native speech/time grouped discussions. `get_conversation_evidence` pages all original, hash-verified sources; inspect every page before a whole-discussion answer. Previews are quoted ASR, not generated summaries. The host may summarize only in the current user-authorized task; no product summary model, summary queue or independent Agent runtime is added.
+
+Grouping allows a three-minute speech pause and exposes original-audio gaps. It does not identify speakers or prove an in-person discussion. The native app exports time-aligned continuous playback on request; source deletion invalidates the derived transcript and removes generated playback.

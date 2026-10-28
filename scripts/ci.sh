@@ -6,7 +6,7 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 runtime() {
     npm --prefix AgentOneLifeRuntime test
     node plugins/personal-context-memory/test.mjs
-    node --test plugins/agentone-memory/test.mjs plugins/agentone-memory/recall.test.mjs
+    node --test plugins/agentone-memory/test.mjs plugins/agentone-memory/recall.test.mjs plugins/agentone-memory/conversations.test.mjs
     mkdir -p build/benchmarks
     node benchmarks/recall/run.mjs --check --output build/benchmarks/recall-candidate.json
 }
@@ -25,6 +25,9 @@ integration() {
     fixture_dir="$(mktemp -d "${TMPDIR:-/tmp}/agentone-audio-ci.XXXXXX")"
     swift run --skip-build AgentOneAudioHarness --home "$fixture_dir"
     node scripts/test_capture_interop.mjs "$fixture_dir"
+    conversation_dir="$(mktemp -d "${TMPDIR:-/tmp}/agentone-conversation-ci.XXXXXX")"
+    swift run --skip-build AgentOneAudioHarness --home "$conversation_dir" --conversation-check
+    node scripts/test_conversation_interop.mjs "$conversation_dir"
     crash_dir="$(mktemp -d "${TMPDIR:-/tmp}/agentone-pcm-crash-ci.XXXXXX")"
     set +e
     swift run --skip-build AgentOneAudioHarness --home "$crash_dir" --crash-journal
