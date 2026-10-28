@@ -15,7 +15,7 @@ export class ConversationStore {
   check(digest===c.input_digest,'Conversation snapshot changed');return{c,members};
  }
  list({query='',limit=20,offset=0}={}){
-  const rows=this.db.prepare("SELECT * FROM conversations WHERE state<>'superseded' AND (?='' OR instr(lower(transcript_text),lower(?))>0) ORDER BY started_ms DESC").all(query,query);
+  const rows=this.db.prepare("SELECT * FROM conversations WHERE state<>'superseded' ORDER BY started_ms DESC").all().filter(c=>!norm(query)||norm(c.transcript_text).includes(norm(query)));
   const valid=[];for(const row of rows){try{this.snapshot(row.id);valid.push(row)}catch{}}
   return{total:valid.length,next_offset:offset+limit<valid.length?offset+limit:null,conversations:valid.slice(offset,offset+limit).map(c=>({conversation_id:c.id,started_at:iso(c.started_ms),ended_at:iso(c.ended_ms),state:c.state,segment_count:c.segment_count,pending_transcriptions:c.pending_count,missing_audio_ms:c.missing_ms,input_digest:c.input_digest,preview_quotes:c.preview_text})),note:'Logical speech/time grouping with a 3-minute pause allowance. Preview quotes are not a generated summary; speakers and in-person presence are unverified.'};
  }

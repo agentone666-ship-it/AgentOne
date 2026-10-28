@@ -18,6 +18,9 @@ test('whole discussion evidence paginates across chunks and keeps original trans
 test('deleted or revised sources cannot serve an obsolete whole discussion',()=>{
  const f=fixture();try{f.store.db.prepare('UPDATE transcripts SET revision=2 WHERE segment_id=?').run('second');assert.throws(()=>f.api.evidence({conversation_id:f.id}),/sources changed/);assert.equal(f.api.list().total,0);f.store.db.prepare('UPDATE transcripts SET revision=1 WHERE segment_id=?').run('second');f.store.db.prepare("UPDATE segments SET state='deleted' WHERE id='second'").run();assert.equal(f.api.list().total,0);}finally{f.close()}
 });
+test('whole discussion search tolerates ASR spaces between Chinese words',()=>{
+ const f=fixture();try{f.store.db.prepare('UPDATE conversations SET transcript_text=? WHERE id=?').run('每个人 都有 自己的 数字 员工',f.id);assert.equal(f.api.list({query:'数字员工'}).total,1);assert.equal(f.api.list({query:'不存在的内容'}).total,0);}finally{f.close()}
+});
 test('changed physical audio is rejected and no product summary queue is installed',()=>{
  const f=fixture();try{writeFileSync(join(f.root,'Audio/first.m4a'),'changed');assert.throws(()=>f.api.evidence({conversation_id:f.id}),/changed/);assert.equal(f.store.db.prepare("SELECT count(*) n FROM sqlite_master WHERE type='table' AND name IN ('conversation_jobs','conversation_summaries')").get().n,0);}finally{f.close()}
 });

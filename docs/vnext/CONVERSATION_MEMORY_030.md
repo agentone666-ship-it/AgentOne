@@ -2,7 +2,7 @@
 
 ## STATUS
 
-Implemented whole-discussion organization, continuous derived playback and bounded native transcription. Packaging and installed-app validation are tracked below. A minute-long storage chunk is not a conversation. Summarization belongs to the current user-authorized Codex task.
+Implemented whole-discussion organization, continuous derived playback and bounded native transcription. The 0.3.0 CI bundle has been installed and device capture resumed. A minute-long storage chunk is not a conversation. Summarization belongs to the current user-authorized Codex task.
 
 ## DECISIONS
 
@@ -20,14 +20,16 @@ Implemented whole-discussion organization, continuous derived playback and bound
 - Export derived M4A using absolute source timestamps; verify source hashes before export, recheck source state afterward, validate readable media and retain only the latest derived export. Preserve missing time as silence. Deleting a source invalidates its discussion and removes derived playback.
 - Decode each source sequentially, then recognize overlapping 24-second PCM windows with a 22-second stride. Reconcile rolling partial/final snapshots and overlap timestamps instead of accepting only a minute's final recognition snapshot.
 - Expose read-only `list_conversations` and paginated `get_conversation_evidence` through the existing MCP/plugin. Require all evidence pages for whole-discussion interpretation. Ship no additional Agent runtime or summary service.
+- Match Chinese search terms across ASR word spaces, and avoid inserting word separators into newly saved Chinese transcript text.
 
 ## TESTS
 
-- Full Swift suite: 162 tests passed before the final boundary-retention regression; all 8 conversation/window tests passed afterward.
-- Runtime retry: 58 tests passed; MCP: 24 tests passed; recall benchmark: 18/18 main, 12/12 holdout, 6/6 adversarial scenarios. The first runtime run encountered sidecar startup timeouts during very high machine load; rerunning passed without changing those tests.
+- Final full Swift suite: 164 tests passed, including boundary retention and Chinese search across ASR word spaces.
+- Runtime retry: 58 tests passed; final MCP suite: 25 tests passed; recall benchmark: 18/18 main, 12/12 holdout, 6/6 adversarial scenarios. The first runtime run encountered sidecar startup timeouts during very high machine load; rerunning passed without changing those tests.
 - Native real AAC fixture -> whole conversation -> readable 2-second M4A -> paginated MCP evidence passed. Source transcript fixture text is synthetic and does not prove real speech quality.
 - New export regression also checks nonzero decoded energy on both sides of the original source-file boundary. PCM crash recovery preserved 96,000 frames.
-- Real-audio check from a temporary signed bundle was rejected by Speech authorization. No permission changes or cloud fallback were attempted. Installed-app ASR acceptance remains necessary before claiming the truncation is fixed on real recordings.
+- Real-audio check from a temporary signed bundle was rejected by Speech authorization. No permission changes or cloud fallback were attempted. After installing the verified CI bundle, application-authorized re-transcription succeeded: one previously tail-only result began at 49.92 seconds, while its new version includes speech from zero; another advanced from 43.56 to 13.50 seconds. Recognition errors remain; this is evidence of recovered leading speech, not proof of lossless transcription.
+- CI for implementation commit f1b873e passed all workflow, Node 22/24, macOS test, native integration and Release package checks. The local Release package also passed signature, resource isolation, privacy metadata and bundled MCP validation.
 
 ## HANDOFF
 

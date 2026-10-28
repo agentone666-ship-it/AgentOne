@@ -88,13 +88,15 @@ public final class ConversationMemory: @unchecked Sendable {
     }
 
     public func recent(query: String = "", limit: Int = 30) throws -> [[String:String]] {
-        try database.rows("""
+        let rows = try database.rows("""
           SELECT c.* FROM conversations c
-          WHERE c.state<>'superseded' AND (?='' OR instr(lower(c.transcript_text),lower(?))>0)
+          WHERE c.state<>'superseded'
           AND NOT EXISTS(SELECT 1 FROM conversation_segments m JOIN segments s ON s.id=m.segment_id
                          WHERE m.conversation_id=c.id AND s.state<>'sealed')
-          ORDER BY c.started_ms DESC LIMIT ?
-          """,[query,query,String(min(max(1,limit),100))])
+          ORDER BY c.started_ms DESC
+          """)
+        let key=query.filter {!$0.isWhitespace}.lowercased()
+        return Array(rows.filter {key.isEmpty || ($0["transcript_text"] ?? "").filter {!$0.isWhitespace}.lowercased().contains(key)}.prefix(min(max(1,limit),100)))
     }
 
     @discardableResult public func retranscribe(id: String) throws -> Int {

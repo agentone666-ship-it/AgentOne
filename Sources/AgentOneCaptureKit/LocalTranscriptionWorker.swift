@@ -107,7 +107,7 @@ public struct AudioUtterance: Codable, Sendable {
         }
         let file=try AVAudioFile(forReading:url)
         let utterances=BoundedTranscription.merge(recognized,durationMilliseconds:Int(Double(file.length)/file.processingFormat.sampleRate*1000))
-        return (utterances.map(\.text).joined(separator:" "),utterances)
+        return (utterances.map(\.text).joined(separator:localeIdentifier.hasPrefix("zh") ? "":" "),utterances)
     }
 
     private func transcribeWindow(_ url: URL, with recognizer: SFSpeechRecognizer) async throws -> (String, [AudioUtterance]) {

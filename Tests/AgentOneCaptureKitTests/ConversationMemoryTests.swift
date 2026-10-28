@@ -22,6 +22,12 @@ private final class DiscussionFixture {
     }
 }
 struct ConversationMemoryTests {
+    @Test func searchMatchesChineseAcrossASRWordSpaces() throws {
+        let f=try DiscussionFixture();try f.add("spaced",second:0,text:"每个人 都有 自己的 数字 员工")
+        try f.store.refresh(now:f.base+500_000,force:true)
+        #expect(try f.store.recent(query:"数字员工").count==1)
+        #expect(try f.store.recent(query:"不存在的内容").isEmpty)
+    }
     @Test func legacyTailOnlyASRDoesNotTrimAwayTheSourceBeginning() throws {
         let f=try DiscussionFixture()
         try f.add("tail-only",second:0,speechFrom:42,speechTo:50)
