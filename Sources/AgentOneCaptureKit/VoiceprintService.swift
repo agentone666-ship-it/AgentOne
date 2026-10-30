@@ -1,5 +1,6 @@
 @preconcurrency import AVFoundation
 import Foundation
+import CryptoKit
 
 @MainActor public final class VoiceprintService {
     private let database:MemoryDatabase
@@ -9,7 +10,10 @@ import Foundation
     public private(set) var status="未录入本人声纹"
     public private(set) var enrolling=false
     public let models=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/AgentOne/Voiceprint")
-    private var folder:URL {database.root.appendingPathComponent("Voiceprint")}
+    private var folder:URL {
+        let key=SHA256.hash(data:Data(database.root.standardizedFileURL.path.utf8)).map {String(format:"%02x",$0)}.joined()
+        return models.appendingPathComponent("Profiles").appendingPathComponent(key)
+    }
     private var profile:URL {folder.appendingPathComponent("owner.json")}
     public var installed:Bool {FileManager.default.isExecutableFile(atPath:models.appendingPathComponent("runtime/bin/python").path) && FileManager.default.fileExists(atPath:models.appendingPathComponent("models.json").path)}
     public var enrolled:Bool {VoiceprintStore(database:database).profileID != nil}

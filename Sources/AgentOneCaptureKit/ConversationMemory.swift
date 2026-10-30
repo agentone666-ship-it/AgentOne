@@ -16,16 +16,20 @@ public final class ConversationMemory: @unchecked Sendable {
           (SELECT COUNT(*) FROM transcripts) transcripts,
           (SELECT COALESCE(SUM(revision),0) FROM transcripts) revisions,
           (SELECT COALESCE(MAX(created_ms),0) FROM transcripts) changed,
-          (SELECT COALESCE(MAX(updated_ms),0) FROM jobs WHERE stage='transcribe') queue_changed
+          (SELECT COALESCE(MAX(updated_ms),0) FROM jobs WHERE stage='transcribe') queue_changed,
+          (SELECT COUNT(*) FROM voice_matches) voice_count,
+          (SELECT COALESCE(MAX(created_ms),0) FROM voice_matches) voice_changed,
+          (SELECT value FROM meta WHERE key='voiceprint_profile') voice_profile
           """).first ?? [:]
         let nextSignature = fingerprint.keys.sorted().map { $0 + ":" + (fingerprint[$0] ?? "") }.joined(separator: ";")
         guard force || signature != nextSignature || now-lastScan >= 15_000 else { return }
         try database.transaction {
             let rows = try database.rows("""
-              SELECT s.id,s.started_ms,s.ended_ms,s.sha256,t.revision,t.text,t.utterances_json,t.status,
+              SELECT s.id,s.started_ms,s.ended_ms,s.sha256,t.revision,t.text,t.utterances_json,t.status,v.status voice_status,v.intervals_json voice_intervals,
               EXISTS(SELECT 1 FROM jobs j WHERE j.segment_id=s.id AND j.stage='transcribe' AND j.state IN ('pending','leased') AND j.input_revision=COALESCE(t.revision,0)) retry_pending
               FROM segments s LEFT JOIN transcripts t ON t.segment_id=s.id
               AND t.revision=(SELECT MAX(revision) FROM transcripts WHERE segment_id=s.id)
+              LEFT JOIN voice_matches v ON v.segment_id=s.id AND v.source_hash=s.sha256 AND v.profile_id=(SELECT value FROM meta WHERE key='voiceprint_profile')
               WHERE s.state='sealed' ORDER BY s.started_ms,s.id
               """)
             let chunks = rows.compactMap(Chunk.init)
@@ -38,7 +42,7 @@ public final class ConversationMemory: @unchecked Sendable {
             }
             var activeIDs = Set<String>()
             for group in groups {
-                guard group.reduce(0, { $0 + $1.text.filter { !$0.isWhitespace }.count }) >= 8,
+                guard group.reduce(0, { $0 + $1.text.filter { !$0.isWhitespace }.count }) >= 8 || group.contains(where:{$0.ownerDetected}),
                       let first = group.first else { continue }
                 let speechStart = group.map { $0.speech!.0 }.min()!, speechEnd = group.map { $0.speech!.1 }.max()!
                 // Include the complete boundary chunks. Legacy ASR may have
@@ -55,7 +59,7 @@ public final class ConversationMemory: @unchecked Sendable {
                     let elapsed = max(0, chunk.start-start)/1000
                     return "[\(elapsed/60):\(String(format: "%02lld",elapsed%60))] " + chunk.text
                 }.joined(separator: "\n")
-                let preview = group.prefix(3).map { String($0.text.prefix(100)) }.joined(separator: " … ")
+                let preview = group.prefix(3).map { $0.text.isEmpty ? "检测到本人人声，文字尚不可用":String($0.text.prefix(100)) }.joined(separator: " … ")
                 let input = [String(start),String(end),state] + members.map { [$0.id,$0.hash,String($0.revision)].joined(separator: ":") }
                 let digest = SHA256.hash(data: Data(input.joined(separator: "\n").utf8)).map { String(format: "%02x",$0) }.joined()
                 let old = try database.rows("SELECT input_digest,pending_count FROM conversations WHERE id=?",[id]).first
@@ -119,10 +123,12 @@ public final class ConversationMemory: @unchecked Sendable {
         let id: String, hash: String, text: String
         let start: Int64, end: Int64, revision: Int
         let pending: Bool
+        let ownerDetected: Bool
         let speech: (Int64,Int64)?
         init?(_ row: [String:String]) {
             guard let id=row["id"],let hash=row["sha256"],let start=Int64(row["started_ms"] ?? ""),let end=Int64(row["ended_ms"] ?? ""),end>start else { return nil }
             self.id=id;self.hash=hash;self.start=start;self.end=end
+            ownerDetected=row["voice_status"]=="detected"
             revision=Int(row["revision"] ?? "") ?? 0;pending=revision == 0 || row["retry_pending"]=="1";text=row["text"]?.trimmingCharacters(in:.whitespacesAndNewlines) ?? ""
             let utterances = row["utterances_json"].flatMap { $0.data(using:.utf8) }.flatMap { try? JSONSerialization.jsonObject(with:$0) as? [[String:Any]] } ?? []
             let ranges = utterances.compactMap { u -> (Int64,Int64)? in
@@ -130,7 +136,13 @@ public final class ConversationMemory: @unchecked Sendable {
                 let lo=max(start,start+a),hi=min(end,start+b);return hi>lo ? (lo,hi):nil
             }
             if !text.isEmpty,row["status"] != "no_speech" { speech = ranges.isEmpty ? (start,end):(ranges.map(\.0).min()!,ranges.map(\.1).max()!) }
-            else { speech=nil }
+            else if ownerDetected,let data=row["voice_intervals"]?.data(using:.utf8),let intervals=try? JSONSerialization.jsonObject(with:data) as? [[String:Any]] {
+                let spans=intervals.compactMap { item -> (Int64,Int64)? in
+                    guard let lo=item["start_ms"] as? Int64,let hi=item["end_ms"] as? Int64 else {return nil}
+                    let a=max(start,start+lo),b=min(end,start+hi);return b>a ? (a,b):nil
+                }
+                if let lo=spans.map(\.0).min(),let hi=spans.map(\.1).max() {speech=(lo,hi)}else{speech=nil}
+            } else { speech=nil }
         }
     }
 }

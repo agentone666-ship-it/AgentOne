@@ -131,6 +131,17 @@ struct BoundedTranscriptionTests {
 }
 
 struct VoiceprintTests {
+    @Test func detectedOwnerVoiceCreatesAConversationEvenWhenASRIsEmpty() throws {
+        let f=try DiscussionFixture();try f.add("voice-only",second:0,text:"")
+        try f.db.execute("INSERT INTO meta VALUES ('voiceprint_profile','fixture')")
+        try f.db.execute("INSERT INTO voice_matches VALUES ('voice-only','fixture',?,'detected',0.9,?,0)",[String(repeating:"a",count:64),"[{\"start_ms\":2000,\"end_ms\":6500}]"])
+        try f.store.refresh(now:f.base+500_000,force:true)
+        let scene=try #require(f.store.recent().first)
+        #expect(scene["transcript_text"]=="")
+        #expect(try VoiceprintStore(database:f.db).decorate([scene]).first?["voice_presence"]=="detected")
+        #expect(scene["preview_text"]?.contains("文字尚不可用")==true)
+    }
+
     @Test func participationIsConservativeAndNeverDeletesSources() throws {
         let f=try DiscussionFixture();try f.add("a",second:0);try f.add("b",second:60)
         try f.store.refresh(now:f.base+500_000,force:true)
