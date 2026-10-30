@@ -59,6 +59,11 @@ import SwiftUI
     let worker: LocalTranscriptionWorker?
     let labeler:LocalTopicLabeler?
     let conversations:ConversationMemory?
+    let voiceprint:VoiceprintService?
+    @Published var voiceprintStatus="未录入声纹"
+    @Published var voiceprintEnrolling=false
+    @Published var voiceFilter="all"
+    private var voiceTask:Task<Void,Never>?
     private var desiredRecording = false
     private var sleeping = false
     private var locked = false
@@ -78,6 +83,7 @@ import SwiftUI
         worker = db.map { LocalTranscriptionWorker(database: $0) }
         labeler=db.map {LocalTopicLabeler(database:$0)}
         conversations=db.map {ConversationMemory(database:$0)}
+        voiceprint=db.map {VoiceprintService(database:$0)}
         if db == nil { message = "Memory 目录无法打开；录音不会启动。" }
         service?.onFailure = { [weak self] message in
             guard let self else { return }
@@ -155,6 +161,14 @@ import SwiftUI
                     self.decisionStatus=self.laya.status+" · "+service.decisionStatus.snapshot.detail
                 }
                 do {try await Task.sleep(for:.seconds(2))} catch {return}
+            }
+        }
+        voiceTask=Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else {return}
+                await self.voiceprint?.runNext()
+                self.updateVoiceprintState();self.refresh()
+                do {try await Task.sleep(for:.seconds(5))} catch {return}
             }
         }
         syncLegacyEvents()
@@ -235,6 +249,7 @@ import SwiftUI
     }
 
     func prepareForExit() async {
+        voiceTask?.cancel();voiceprint?.cancelEnrollment()
         polling?.cancel();metering?.cancel();decisions?.cancel();laya.stop()
         if service?.isIndependentRecorder==true {eventService?.stop();locationService.stop();try? service?.heartbeat()}
         else {
@@ -420,10 +435,21 @@ import SwiftUI
             """
             rows = try database.rows(sql,[query,query])
             try conversations?.refresh()
-            conversationRows = try conversations?.recent(query:query) ?? []
+            let scenes = try conversations?.recent(query:query,limit:100) ?? []
+            conversationRows = try VoiceprintStore(database:database).decorate(scenes).filter {voiceFilter=="all" || $0["voice_presence"]==voiceFilter}
+
             asrStatus = worker?.status ?? "转写服务不可用"
         } catch { message = "Memory 读取失败，请检查目录权限" }
     }
+
+    func updateVoiceprintState() {voiceprintStatus=voiceprint?.status ?? "声纹服务不可用";voiceprintEnrolling=voiceprint?.enrolling ?? false}
+    func installVoiceprint() {Task {await voiceprint?.install();updateVoiceprintState()}}
+    func recordVoiceprint() {Task {await voiceprint?.startEnrollment();updateVoiceprintState()}}
+    func finishVoiceprint() {Task {await voiceprint?.finishEnrollment();updateVoiceprintState();refresh()}}
+    func cancelVoiceprint() {voiceprint?.cancelEnrollment();updateVoiceprintState()}
+    func forgetVoiceprint() {do {try voiceprint?.forget();updateVoiceprintState();refresh()} catch {voiceprintStatus=error.localizedDescription}}
+    func keepConversation(_ row:[String:String]) {do {if let id=row["id"],let database {try VoiceprintStore(database:database).keep(id);refresh()}}catch{message=error.localizedDescription}}
+    func deleteConversation(_ row:[String:String]) {do {if let id=row["id"],let database {try VoiceprintStore(database:database).delete(id,expectedDigest:row["input_digest"]);refresh();message="本场原音已删除"}}catch{message="删除未全部完成："+error.localizedDescription}}
 
     func playConversation(_ row: [String:String]) {
         guard !conversationBusy,let id=row["id"],let database else {return}

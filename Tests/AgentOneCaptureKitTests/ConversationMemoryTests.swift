@@ -129,3 +129,65 @@ struct BoundedTranscriptionTests {
         #expect(seconds==[24,24,16])
     }
 }
+
+struct VoiceprintTests {
+    @Test func detectedOwnerVoiceCreatesAConversationEvenWhenASRIsEmpty() throws {
+        let f=try DiscussionFixture();try f.add("voice-only",second:0,text:"")
+        try f.db.execute("INSERT INTO meta VALUES ('voiceprint_profile','fixture')")
+        try f.db.execute("INSERT INTO voice_matches VALUES ('voice-only','fixture',?,'detected',0.9,?,0)",[String(repeating:"a",count:64),"[{\"start_ms\":2000,\"end_ms\":6500}]"])
+        try f.store.refresh(now:f.base+500_000,force:true)
+        let scene=try #require(f.store.recent().first)
+        #expect(scene["transcript_text"]=="")
+        #expect(try VoiceprintStore(database:f.db).decorate([scene]).first?["voice_presence"]=="detected")
+        #expect(scene["preview_text"]?.contains("文字尚不可用")==true)
+    }
+
+    @Test func participationIsConservativeAndNeverDeletesSources() throws {
+        let f=try DiscussionFixture();try f.add("a",second:0);try f.add("b",second:60)
+        try f.store.refresh(now:f.base+500_000,force:true)
+        let service=VoiceprintStore(database:f.db)
+        #expect(try service.decorate(f.store.recent()).first?["voice_presence"]=="not_enrolled")
+        try f.db.execute("INSERT INTO meta VALUES ('voiceprint_profile','fixture-profile')")
+        #expect(try service.decorate(f.store.recent()).first?["voice_presence"]=="pending")
+        for id in ["a","b"] {try f.db.execute("INSERT INTO voice_matches VALUES (?,'fixture-profile',?,'not_detected',0.1,'[]',0)",[id,String(repeating:"a",count:64)])}
+        #expect(try service.decorate(f.store.recent()).first?["voice_presence"]=="not_detected")
+        #expect(try f.db.rows("SELECT id FROM segments WHERE state='sealed'").count==2)
+        try f.db.execute("UPDATE voice_matches SET status='uncertain' WHERE segment_id='a'")
+        #expect(try service.decorate(f.store.recent()).first?["voice_presence"]=="uncertain")
+        try f.db.execute("UPDATE voice_matches SET status='detected' WHERE segment_id='a'")
+        #expect(try service.decorate(f.store.recent()).first?["voice_presence"]=="detected")
+        try f.db.execute("UPDATE voice_matches SET source_hash='changed' WHERE segment_id='a'")
+        #expect(try service.decorate(f.store.recent()).first?["voice_presence"]=="pending")
+        try f.db.execute("UPDATE meta SET value='new-profile' WHERE key='voiceprint_profile'")
+        #expect(try service.decorate(f.store.recent()).first?["voice_presence"]=="pending")
+    }
+    @Test func gapsAndShortEvidenceCannotProduceAnAbsenceClaim() {
+        #expect(VoiceprintStore.presence(profile:true,statuses:["not_detected"],missing:true)=="uncertain")
+        #expect(VoiceprintStore.presence(profile:true,statuses:[],missing:false)=="pending")
+        #expect(VoiceprintStore.presence(profile:true,statuses:["detected","pending"],missing:true)=="detected")
+    }
+    @Test func retentionRequiresUserActionAndDeletionClearsVoiceEvidence() throws {
+        let f=try DiscussionFixture();try f.add("a",second:0);try f.store.refresh(now:f.base+500_000,force:true)
+        let id=try #require(f.store.recent().first?["id"]),store=VoiceprintStore(database:f.db)
+        try store.keep(id);#expect(try store.decorate(f.store.recent()).first?["retention_choice"]=="keep")
+        try f.db.execute("INSERT INTO voice_matches VALUES ('a','fixture',?,'detected',0.9,'[]',0)",[String(repeating:"a",count:64)])
+        var refused=false
+        do {try store.delete(id,expectedDigest:"stale")}catch{refused=true}
+        #expect(refused)
+        #expect(try f.db.rows("SELECT state FROM segments").first?["state"]=="sealed")
+        try store.delete(id)
+        #expect(try f.db.rows("SELECT * FROM voice_matches").isEmpty)
+        #expect(try f.db.rows("SELECT state FROM segments").first?["state"]=="deleted")
+    }
+    @Test func nativeConversionProducesBoundedMonoSixteenKilohertzWav() throws {
+        let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true);defer{try? FileManager.default.removeItem(at:root)}
+        let source=root.appendingPathComponent("source.caf"),wav=root.appendingPathComponent("out.wav")
+        let format=try #require(AVAudioFormat(standardFormatWithSampleRate:48000,channels:2))
+        do {let file=try AVAudioFile(forWriting:source,settings:format.settings);let pcm=try #require(AVAudioPCMBuffer(pcmFormat:format,frameCapacity:96000));pcm.frameLength=96000;for lane in 0..<2 {pcm.floatChannelData![lane].update(repeating:0.01,count:96000)};try file.write(from:pcm)}
+        try VoiceprintAudio.convert(source,to:wav)
+        let result=try AVAudioFile(forReading:wav)
+        #expect(result.processingFormat.sampleRate==16000);#expect(result.processingFormat.channelCount==1)
+        #expect(abs(Double(result.length)/16000-2)<0.01)
+    }
+}

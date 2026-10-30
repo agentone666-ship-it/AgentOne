@@ -185,6 +185,11 @@ struct IslandView: View {
                 Button("原始分片") {showAudioChunks=true}.foregroundStyle(showAudioChunks ? accent:.white.opacity(0.4))
                 Spacer()
             }.font(.system(size:10)).buttonStyle(.plain)
+            if !showAudioChunks {
+                Picker("声音参与",selection:$model.voiceFilter) {
+                    Text("全部").tag("all");Text("有我声音").tag("detected");Text("未检测到我").tag("not_detected");Text("不确定").tag("uncertain")
+                }.pickerStyle(.segmented).onChange(of:model.voiceFilter){_,_ in model.refresh()}
+            }
             if showAudioChunks {chunkRecallPage}
             else {
                 TextField("搜索整场讨论",text:$model.query).textFieldStyle(.plain).font(.system(size:12)).padding(10).background(.white.opacity(0.055),in:RoundedRectangle(cornerRadius:10)).onChange(of:model.query) {_,_ in model.refresh()}
@@ -200,7 +205,7 @@ struct IslandView: View {
         }.sheet(isPresented:Binding(get:{selectedConversation != nil},set:{if !$0 {selectedConversation=nil}})) {
             if let selected=selectedConversation {
                 let current=model.conversationRows.first {$0["id"]==selected["id"]}
-                ConversationDetail(row:current,onPlay:{if let current {model.playConversation(current)}},onTranscribe:{if let current {model.completeConversationTranscription(current)}},onClose:{selectedConversation=nil},busy:model.conversationBusy)
+                ConversationDetail(row:current,onPlay:{if let current {model.playConversation(current)}},onTranscribe:{if let current {model.completeConversationTranscription(current)}},onClose:{selectedConversation=nil},onKeep:{if let current {model.keepConversation(current)}},onDelete:{target in model.deleteConversation(target);selectedConversation=nil},busy:model.conversationBusy)
             }
         }
     }
@@ -238,9 +243,26 @@ struct IslandView: View {
             }.frame(maxHeight: .infinity)
         }
     }
+    private var voiceprintSection:some View {
+        VStack(alignment:.leading,spacing:10) {
+            Text("我的声纹").font(.system(size:17,weight:.semibold))
+            Text(model.voiceprintStatus).font(.system(size:11)).foregroundStyle(.white.opacity(0.7))
+            Text("独自朗读约30秒，至少12秒清晰人声。请关闭播放声音。声纹只保存在本机，不会自动删除未匹配的录音。录音播放里出现你的声音也可能匹配，不能据此证明现场参与。").font(.system(size:10)).foregroundStyle(.white.opacity(0.5))
+            if model.voiceprintEnrolling {
+                Text("可以朗读：今天我准备整理最近的工作记录，回顾讨论过的需求和仍待确认的问题。我们需要保留原始声音，记录时间，并在信息不足的时候保持不确定。这次朗读只用于在本机识别我的声音。")
+                    .font(.system(size:12)).textSelection(.enabled)
+                HStack {Button("完成录制"){model.finishVoiceprint()};Button("取消"){model.cancelVoiceprint()}}
+            }else {
+                HStack {Button("安装本机声纹组件"){model.installVoiceprint()};Button("录制／重录我的声纹"){model.recordVoiceprint()}}
+                Button("移除我的声纹"){model.forgetVoiceprint()}
+            }
+        }.buttonStyle(.plain)
+    }
     private var settingsPage: some View {
         ScrollView {
             VStack(alignment: .leading,spacing: 16) {
+                voiceprintSection
+                Divider().overlay(.white.opacity(0.08))
                 agentConnectionSection
                 Divider().overlay(.white.opacity(0.08))
                 Text("记录偏好").font(.system(size: 17,weight: .semibold))

@@ -86,3 +86,13 @@ CREATE TABLE IF NOT EXISTS conversation_segments (
  transcript_revision INTEGER NOT NULL, ordinal INTEGER NOT NULL,
  PRIMARY KEY(conversation_id,segment_id)
 );
+
+-- Optional owner voice verification; embeddings remain in a private local file.
+CREATE TABLE IF NOT EXISTS voice_matches (
+ segment_id TEXT NOT NULL REFERENCES segments(id), profile_id TEXT NOT NULL,
+ source_hash TEXT NOT NULL, status TEXT NOT NULL, score REAL, intervals_json TEXT NOT NULL,
+ created_ms INTEGER NOT NULL, PRIMARY KEY(segment_id,profile_id)
+);
+CREATE TABLE IF NOT EXISTS conversation_choices (
+ conversation_id TEXT PRIMARY KEY REFERENCES conversations(id), choice TEXT NOT NULL, updated_ms INTEGER NOT NULL
+);

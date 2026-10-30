@@ -24,3 +24,19 @@ test('whole discussion search tolerates ASR spaces between Chinese words',()=>{
 test('changed physical audio is rejected and no product summary queue is installed',()=>{
  const f=fixture();try{writeFileSync(join(f.root,'Audio/first.m4a'),'changed');assert.throws(()=>f.api.evidence({conversation_id:f.id}),/changed/);assert.equal(f.store.db.prepare("SELECT count(*) n FROM sqlite_master WHERE type='table' AND name IN ('conversation_jobs','conversation_summaries')").get().n,0);}finally{f.close()}
 });
+test('owner voice is profile and source scoped, never exported as an embedding',()=>{
+ const f=fixture();try{
+  assert.equal(f.api.list().conversations[0].owner_voice.status,'not_enrolled');
+  f.store.db.prepare("INSERT INTO meta VALUES ('voiceprint_profile','profile-a')").run();
+  assert.equal(f.api.list().conversations[0].owner_voice.status,'pending');
+  const sha=f.store.db.prepare("SELECT sha256 FROM segments WHERE id='first'").get().sha256;
+  for(const id of ['first','second'])f.store.db.prepare("INSERT INTO voice_matches VALUES (?,'profile-a',?,'not_detected',0.1,'[]',0)").run(id,sha);
+  assert.equal(f.api.list().conversations[0].owner_voice.status,'not_detected');
+  f.store.db.prepare("UPDATE voice_matches SET status='detected' WHERE segment_id='second'").run();
+  assert.equal(f.api.evidence({conversation_id:f.id}).owner_voice.status,'detected');
+  f.store.db.prepare("UPDATE meta SET value='profile-b' WHERE key='voiceprint_profile'").run();
+  assert.equal(f.api.list().conversations[0].owner_voice.status,'pending');
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM segments WHERE state='sealed'").get().n,2);
+  assert.ok(!JSON.stringify(f.api.list()).includes('"embedding":'));
+ }finally{f.close()}
+});

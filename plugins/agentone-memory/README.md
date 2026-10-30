@@ -86,3 +86,5 @@ SQLite 元数据与查询不会只读取最近一天，因此旧记录仍可查�
 `list_conversations` lists native speech/time grouped discussions. `get_conversation_evidence` pages all original, hash-verified sources; inspect every page before a whole-discussion answer. Previews are quoted ASR, not generated summaries. The host may summarize only in the current user-authorized task; no product summary model, summary queue or independent Agent runtime is added.
 
 Grouping allows a three-minute speech pause and exposes original-audio gaps. It does not identify speakers or prove an in-person discussion. The native app exports time-aligned continuous playback on request; source deletion invalidates the derived transcript and removes generated playback.
+
+Native owner-voice enrollment optionally adds `owner_voice` to conversation list/evidence. Values are `not_enrolled`, `pending`, `detected`, `not_detected`, or `uncertain`. Voice similarity is not verified physical attendance; absence detection never authorizes deletion. Embeddings are private and are not exported by MCP.
