@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 runtime() {
+    python3 tools/voiceprint/test_policy.py
     npm --prefix AgentOneLifeRuntime test
     node plugins/personal-context-memory/test.mjs
     node --test plugins/agentone-memory/test.mjs plugins/agentone-memory/recall.test.mjs plugins/agentone-memory/conversations.test.mjs

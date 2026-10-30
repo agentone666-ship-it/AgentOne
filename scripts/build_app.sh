@@ -50,6 +50,9 @@ done
 cp -R "$project_dir/plugins/agentone-memory/.codex-plugin" "$project_dir/plugins/agentone-memory/skills" "$plugin_resources/"
 
 cp "$project_dir/tools/laya-decision/worker.py" "$contents_dir/Resources/laya-worker.py"
+cp "$project_dir/tools/voiceprint/worker.py" "$contents_dir/Resources/voiceprint-worker.py"
+cp "$project_dir/tools/voiceprint/setup.py" "$contents_dir/Resources/voiceprint-setup.py"
+cp "$project_dir/tools/voiceprint/voiceprint_policy.py" "$contents_dir/Resources/voiceprint_policy.py"
 
 cat > "$contents_dir/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

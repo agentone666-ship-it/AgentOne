@@ -20,6 +20,7 @@ try {
   assert.equal(existsSync(join(app,'Contents/Resources/AgentOneLifeRuntime')),false);
   assert.equal(existsSync(join(app,'Contents/Resources/AgentOne_AgentOneApp.bundle')),false);
   assert.equal(readFileSync(join(app,'Contents/Resources/laya-worker.py'),'utf8'),readFileSync('tools/laya-decision/worker.py','utf8'));
+  for (const [source,target] of [['worker.py','voiceprint-worker.py'],['setup.py','voiceprint-setup.py'],['voiceprint_policy.py','voiceprint_policy.py']]) assert.equal(readFileSync(join(app,'Contents/Resources',target),'utf8'),readFileSync(join('tools/voiceprint',source),'utf8'));
   const executable=join(app,'Contents/MacOS/AgentOne');
   const recorder=join(app,'Contents/Helpers/AgentOneRecorder.app/Contents/MacOS/AgentOneRecorder');
   assert.equal(existsSync(recorder),true);

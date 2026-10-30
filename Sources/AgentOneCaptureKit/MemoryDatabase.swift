@@ -160,7 +160,7 @@ public final class MemoryDatabase: @unchecked Sendable {
             try execute("UPDATE memories SET status='invalidated',title='',text='',entities_json='[]',input_digest=id WHERE id IN (SELECT memory_id FROM memory_evidence WHERE segment_id=?)",[id])
             try execute("DELETE FROM memory_evidence WHERE memory_id IN (SELECT id FROM memories WHERE status='invalidated')")
             try execute("DELETE FROM meta WHERE instr(key,?)=1",["local_label:"+id+":"])
-            for table in ["transcripts","analyses","corrections"] { try execute("DELETE FROM \(table) WHERE segment_id=?",[id]) }
+            for table in ["transcripts","analyses","corrections","voice_matches"] { try execute("DELETE FROM \(table) WHERE segment_id=?",[id]) }
         }
         for discussion in discussions where discussion.hasPrefix("conversation-") && discussion.allSatisfy({$0.isLetter || $0.isNumber || $0 == "-"}) {
             let playback=root.appendingPathComponent("ConversationPlayback").appendingPathComponent(discussion)

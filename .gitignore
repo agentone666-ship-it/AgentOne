@@ -53,3 +53,7 @@ capture.lock
 *.swo
 __pycache__/
 *.pyc
+
+# Python workers and local voiceprint model artifacts
+__pycache__/
+*.pyc
